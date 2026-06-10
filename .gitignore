@@ -1,0 +1,7 @@
+.pio/
+.elf-archive/
+.vscode/
+*.generated.h
+platformio.local.ini
+__pycache__/
+.DS_Store

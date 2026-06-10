@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WakeInk</title>
+<style>
+  :root {
+    --bg: #111418; --panel: #1b2026; --panel2: #232a32; --text: #e8eaed;
+    --muted: #9aa0a6; --accent: #8ab4f8; --good: #81c995; --bad: #f28b82;
+    --border: #30363d;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+         background: var(--bg); color: var(--text); }
+  header { display: flex; align-items: baseline; gap: 12px; padding: 18px 20px 0; }
+  header h1 { margin: 0; font-size: 22px; letter-spacing: .5px; }
+  header .sub { color: var(--muted); font-size: 13px; }
+  nav { display: flex; gap: 4px; padding: 14px 20px 0; border-bottom: 1px solid var(--border); }
+  nav button { background: none; border: none; color: var(--muted); padding: 10px 14px;
+               font-size: 14px; cursor: pointer; border-bottom: 2px solid transparent; }
+  nav button.active { color: var(--accent); border-bottom-color: var(--accent); }
+  main { padding: 16px 20px 60px; max-width: 760px; margin: 0 auto; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+          padding: 16px; margin-bottom: 14px; }
+  .card h2 { margin: 0 0 12px; font-size: 15px; color: var(--accent); font-weight: 600; }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 10px;
+         padding: 7px 0; flex-wrap: wrap; }
+  .row label { font-size: 14px; }
+  .hint { color: var(--muted); font-size: 12px; margin: 2px 0 6px; }
+  input[type=text], input[type=password], input[type=email], input[type=number], input[type=time], select {
+    background: var(--panel2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 8px 10px; font-size: 14px; min-width: 0; }
+  input[type=number] { width: 80px; }
+  input.wide { width: 100%; }
+  input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); }
+  button.btn { background: var(--accent); color: #111; border: none; border-radius: 6px;
+               padding: 9px 16px; font-size: 14px; font-weight: 600; cursor: pointer; }
+  button.btn.ghost { background: var(--panel2); color: var(--text); border: 1px solid var(--border); }
+  button.btn.danger { background: var(--bad); }
+  button.btn.small { padding: 5px 10px; font-size: 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  td, th { padding: 8px 6px; border-bottom: 1px solid var(--border); text-align: left;
+           vertical-align: middle; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  .pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px;
+          background: var(--panel2); border: 1px solid var(--border); color: var(--muted); }
+  .pill.ok { color: var(--good); border-color: var(--good); }
+  .pill.err { color: var(--bad); border-color: var(--bad); }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 20px; }
+  .grid .row { padding: 5px 0; }
+  #toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+           background: var(--panel2); border: 1px solid var(--border); color: var(--text);
+           padding: 10px 18px; border-radius: 8px; font-size: 14px; opacity: 0;
+           transition: opacity .25s; pointer-events: none; }
+  #toast.show { opacity: 1; }
+  .days { display: flex; gap: 6px; flex-wrap: wrap; }
+  .days label { display: flex; align-items: center; gap: 4px; font-size: 13px;
+                background: var(--panel2); border: 1px solid var(--border);
+                border-radius: 6px; padding: 5px 8px; }
+  .evtitle { font-weight: 600; }
+  .evmeta { color: var(--muted); font-size: 12px; }
+  .section-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>WakeInk</h1>
+  <span class="sub" id="hostLabel"></span>
+</header>
+<nav>
+  <button data-tab="status" class="active">Status</button>
+  <button data-tab="calendars">Calendars</button>
+  <button data-tab="settings">Settings</button>
+  <button data-tab="wifi">WiFi</button>
+</nav>
+<main>
+
+<section id="tab-status">
+  <div class="card">
+    <h2>Device</h2>
+    <div class="grid">
+      <div class="row"><label>WiFi</label><span id="stWifi" class="pill"></span></div>
+      <div class="row"><label>IP</label><span id="stIp" class="pill"></span></div>
+      <div class="row"><label>Device time</label><span id="stTime" class="pill"></span></div>
+      <div class="row"><label>Last sync</label><span id="stSync" class="pill"></span></div>
+      <div class="row"><label>Alarms</label><span id="stPause" class="pill"></span></div>
+      <div class="row"><label>Free heap</label><span id="stHeap" class="pill"></span></div>
+    </div>
+    <div class="section-actions">
+      <button class="btn" onclick="post('/api/sync').then(()=>toast('Sync requested'))">Sync now</button>
+      <button class="btn ghost" onclick="post('/api/test-alarm').then(()=>toast('Test alarm triggered'))">Test alarm</button>
+      <button class="btn ghost" onclick="post('/api/reboot').then(()=>toast('Rebooting...'))">Reboot</button>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Pause alarms</h2>
+    <div class="section-actions" id="pauseButtons">
+      <button class="btn ghost" data-mins="30" onclick="pause(30)">30 min</button>
+      <button class="btn ghost" data-mins="60" onclick="pause(60)">1 hour</button>
+      <button class="btn ghost" data-mins="240" onclick="pause(240)">4 hours</button>
+      <button class="btn ghost" data-mins="-1" onclick="pause(-1)">Indefinitely</button>
+      <button class="btn" id="btnResume" onclick="pause(0)">Active</button>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Upcoming events</h2>
+    <div id="eventList"></div>
+  </div>
+  <div class="card">
+    <h2>Skipped instances</h2>
+    <div class="hint">Events you've muted; they come back automatically after they pass.</div>
+    <div id="skipList"></div>
+  </div>
+</section>
+
+<section id="tab-calendars" hidden>
+  <div class="card">
+    <h2>ICS calendars</h2>
+    <div class="hint">Paste Google Calendar "Secret address in iCal format" links
+      (Calendar settings &rarr; Integrate calendar). webcal:// links are accepted too.</div>
+    <table id="calTable">
+      <thead><tr><th>Name</th><th>ICS URL</th><th>On</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <div class="section-actions">
+      <button class="btn ghost" onclick="addCalRow('', '', true)">Add calendar</button>
+      <button class="btn" onclick="saveCalendars()">Save calendars</button>
+    </div>
+  </div>
+</section>
+
+<section id="tab-settings" hidden>
+  <div class="card">
+    <h2>General</h2>
+    <div class="row"><label>Timezone</label>
+      <span style="display:flex;gap:6px">
+        <select id="tzSelect"></select>
+        <button class="btn ghost small" onclick="detectTimezone()">Detect</button>
+      </span></div>
+    <div class="hint">"Detect" uses this browser's timezone. Remember to hit Save settings below.</div>
+    <div class="row"><label>24-hour time</label><input type="checkbox" id="use_24_hour_time"></div>
+    <div class="row" style="display:block"><label>Your email addresses (for RSVP detection)</label>
+      <input type="text" class="wide" id="my_emails" placeholder="you@gmail.com, you@work.com"></div>
+    <div class="hint">Comma separated; any match counts as you. Used to find your
+      accept/decline/maybe status in invites. Leave blank to treat every event as accepted.</div>
+    <div class="row"><label>Poll interval (minutes)</label><input type="number" id="poll_interval_minutes" min="1" max="120"></div>
+    <div class="row"><label>Look-ahead window (days)</label><input type="number" id="lookahead_days" min="1" max="31"></div>
+  </div>
+
+  <div class="card">
+    <h2>Alarms</h2>
+    <div class="row"><label>Lead time before event (minutes)</label><input type="number" id="alarm_lead_time_minutes" min="0" max="240"></div>
+    <div class="row"><label>Different lead time for early meetings</label><input type="checkbox" id="early_meeting_alert_enabled"></div>
+    <div class="row"><label>Early = meetings before</label><input type="time" id="early_before"></div>
+    <div class="row"><label>Early meeting lead time (minutes)</label><input type="number" id="early_meeting_lead_time_minutes" min="0" max="240"></div>
+    <div class="row"><label>Flash frontlight while ringing</label><input type="checkbox" id="alarm_flash_frontlight"></div>
+    <div class="row"><label>Play sound while ringing</label><input type="checkbox" id="alarm_sound_enabled"></div>
+    <div class="row"><label>Alarm volume</label>
+      <span style="display:flex;align-items:center;gap:8px;flex:1;max-width:280px">
+        <input type="range" id="alarm_volume" min="0" max="100" step="5" style="flex:1"
+               oninput="document.getElementById('volLabel').textContent=this.value+'%'">
+        <span id="volLabel" class="evmeta"></span>
+      </span></div>
+    <div class="row"><label>Auto-stop ringing after (minutes)</label><input type="number" id="alarm_max_minutes" min="1" max="30"></div>
+    <div class="row" style="display:block"><label>Alarm sound</label>
+      <div class="hint" id="soundStatus">-</div>
+      <div class="section-actions">
+        <input type="file" id="soundFile" accept=".wav,audio/wav,audio/x-wav">
+        <button class="btn ghost small" onclick="uploadSound()">Upload</button>
+        <button class="btn ghost small" onclick="resetSound()">Reset to default</button>
+      </div>
+      <div class="hint">WAV only: 16-bit PCM, mono or stereo, 8-48 kHz, up to 4 MB.
+        Loops until the alarm is dismissed. Use "Test alarm" on the Status tab to hear it.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Filtering</h2>
+    <div class="row" style="display:block"><label>Ignore keywords (comma separated)</label>
+      <div class="hint">Events whose title contains any of these are hidden and never alarm.</div>
+      <input type="text" class="wide" id="ignore_keywords" placeholder="standup, lunch hold"></div>
+    <div class="row"><label>Show "maybe" events</label><input type="checkbox" id="show_maybe_events"></div>
+    <div class="row"><label>Alarm on unaccepted invites</label><input type="checkbox" id="alarm_on_unaccepted_events"></div>
+    <div class="row"><label>Only alert for events with meeting links</label><input type="checkbox" id="only_alert_with_links"></div>
+    <div class="row"><label>&nbsp;&nbsp;Count any URL as a meeting link</label><input type="checkbox" id="alert_with_any_link"></div>
+    <div class="row" style="display:block"><label>&nbsp;&nbsp;Ignore these link domains</label>
+      <input type="text" class="wide" id="ignore_link_domains" placeholder="notion.so, docs.google.com"></div>
+  </div>
+
+  <div class="card">
+    <h2>Work hours</h2>
+    <div class="row"><label>Only alert during work hours</label><input type="checkbox" id="work_hours_enabled"></div>
+    <div class="row"><label>Start</label><input type="time" id="work_start"></div>
+    <div class="row"><label>End</label><input type="time" id="work_end"></div>
+    <div class="row" style="display:block"><label>Work days</label>
+      <div class="days" id="workDays"></div></div>
+    <div class="row" style="display:block"><label>Always-trigger keywords (bypass work hours)</label>
+      <input type="text" class="wide" id="always_trigger_keywords" placeholder="oncall, interview"></div>
+  </div>
+
+  <div class="section-actions">
+    <button class="btn" onclick="saveSettings()">Save settings</button>
+  </div>
+</section>
+
+<section id="tab-wifi" hidden>
+  <div class="card">
+    <h2>Saved networks</h2>
+    <div id="wifiSaved"></div>
+    <div class="row" style="margin-top:8px">
+      <input type="text" id="newSsid" placeholder="SSID" style="flex:1">
+      <input type="password" id="newPass" placeholder="Password" style="flex:1">
+      <button class="btn" onclick="addWifi()">Add</button>
+    </div>
+    <div class="hint" id="wifiHint"></div>
+  </div>
+  <div class="card">
+    <h2>Nearby networks</h2>
+    <div class="section-actions"><button class="btn ghost" onclick="scanWifi()">Scan</button></div>
+    <div id="scanResults"></div>
+  </div>
+</section>
+
+</main>
+<div id="toast"></div>
+
+<script>
+const TIMEZONES = [
+  ["Pacific/Honolulu","HST10"],
+  ["America/Anchorage","AKST9AKDT,M3.2.0,M11.1.0"],
+  ["America/Los_Angeles","PST8PDT,M3.2.0,M11.1.0"],
+  ["America/Vancouver","PST8PDT,M3.2.0,M11.1.0"],
+  ["America/Tijuana","PST8PDT,M3.2.0,M11.1.0"],
+  ["America/Phoenix","MST7"],
+  ["America/Denver","MST7MDT,M3.2.0,M11.1.0"],
+  ["America/Edmonton","MST7MDT,M3.2.0,M11.1.0"],
+  ["America/Chicago","CST6CDT,M3.2.0,M11.1.0"],
+  ["America/Winnipeg","CST6CDT,M3.2.0,M11.1.0"],
+  ["America/Mexico_City","CST6"],
+  ["America/New_York","EST5EDT,M3.2.0,M11.1.0"],
+  ["America/Toronto","EST5EDT,M3.2.0,M11.1.0"],
+  ["America/Detroit","EST5EDT,M3.2.0,M11.1.0"],
+  ["America/Bogota","<-05>5"],
+  ["America/Halifax","AST4ADT,M3.2.0,M11.1.0"],
+  ["America/Santiago","<-04>4<-03>,M9.1.6/24,M4.1.6/24"],
+  ["America/Sao_Paulo","<-03>3"],
+  ["America/Argentina/Buenos_Aires","<-03>3"],
+  ["America/St_Johns","NST3:30NDT,M3.2.0,M11.1.0"],
+  ["UTC","UTC0"],
+  ["Europe/London","GMT0BST,M3.5.0/1,M10.5.0"],
+  ["Europe/Dublin","GMT0IST,M3.5.0/1,M10.5.0"],
+  ["Europe/Lisbon","WET0WEST,M3.5.0/1,M10.5.0"],
+  ["Europe/Paris","CET-1CEST,M3.5.0,M10.5.0/3"],
+  ["Europe/Berlin","CET-1CEST,M3.5.0,M10.5.0/3"],
+  ["Europe/Madrid","CET-1CEST,M3.5.0,M10.5.0/3"],
+  ["Europe/Rome","CET-1CEST,M3.5.0,M10.5.0/3"],
+  ["Europe/Amsterdam","CET-1CEST,M3.5.0,M10.5.0/3"],
+  ["Europe/Stockholm","CET-1CEST,M3.5.0,M10.5.0/3"],
+  ["Europe/Warsaw","CET-1CEST,M3.5.0,M10.5.0/3"],
+  ["Europe/Athens","EET-2EEST,M3.5.0/3,M10.5.0/4"],
+  ["Europe/Helsinki","EET-2EEST,M3.5.0/3,M10.5.0/4"],
+  ["Europe/Kyiv","EET-2EEST,M3.5.0/3,M10.5.0/4"],
+  ["Africa/Cairo","EET-2EEST,M4.5.5/0,M10.5.4/24"],
+  ["Africa/Johannesburg","SAST-2"],
+  ["Asia/Jerusalem","IST-2IDT,M3.4.4/26,M10.5.0"],
+  ["Europe/Istanbul","<+03>-3"],
+  ["Europe/Moscow","MSK-3"],
+  ["Asia/Dubai","<+04>-4"],
+  ["Asia/Karachi","PKT-5"],
+  ["Asia/Kolkata","IST-5:30"],
+  ["Asia/Dhaka","<+06>-6"],
+  ["Asia/Bangkok","<+07>-7"],
+  ["Asia/Jakarta","WIB-7"],
+  ["Asia/Shanghai","CST-8"],
+  ["Asia/Singapore","<+08>-8"],
+  ["Asia/Hong_Kong","HKT-8"],
+  ["Asia/Taipei","CST-8"],
+  ["Australia/Perth","AWST-8"],
+  ["Asia/Tokyo","JST-9"],
+  ["Asia/Seoul","KST-9"],
+  ["Australia/Adelaide","ACST-9:30ACDT,M10.1.0,M4.1.0/3"],
+  ["Australia/Brisbane","AEST-10"],
+  ["Australia/Sydney","AEST-10AEDT,M10.1.0,M4.1.0/3"],
+  ["Australia/Melbourne","AEST-10AEDT,M10.1.0,M4.1.0/3"],
+  ["Pacific/Auckland","NZST-12NZDT,M9.5.0,M4.1.0/3"]
+];
+
+function detectTimezone() {
+  const name = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const sel = $("tzSelect");
+  if ([...sel.options].some(o => o.value === name)) {
+    sel.value = name;
+    toast("Detected " + name + " — hit Save settings");
+    return;
+  }
+  // Not in the table: fall back to the browser's current fixed UTC offset
+  // (no DST rules, but the clock will be right today).
+  const offMin = -new Date().getTimezoneOffset();  // minutes east of UTC
+  const sign = offMin >= 0 ? "+" : "-";
+  const abs = Math.abs(offMin);
+  const hh = String(Math.floor(abs / 60)).padStart(2, "0");
+  const mm = abs % 60;
+  let posix = "<" + sign + hh + (mm ? String(mm).padStart(2, "0") : "") + ">" +
+    (offMin >= 0 ? "-" : "") + Math.floor(abs / 60) + (mm ? ":" + String(mm).padStart(2, "0") : "");
+  const opt = document.createElement("option");
+  opt.value = name;
+  opt.textContent = name + " (fixed offset)";
+  opt.dataset.posix = posix;
+  sel.append(opt);
+  sel.value = name;
+  toast("Detected " + name + " (fixed offset, no DST) — hit Save settings");
+}
+const DAY_NAMES = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+
+const $ = id => document.getElementById(id);
+const get = url => fetch(url).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); });
+const post = (url, body) => fetch(url, { method: "POST", headers: {"Content-Type":"application/json"},
+  body: body ? JSON.stringify(body) : "{}" }).then(r => { if (!r.ok) return r.text().then(t => { throw new Error(t || r.status); }); });
+
+let toastTimer;
+function toast(msg, isErr) {
+  const el = $("toast");
+  el.textContent = msg;
+  el.style.borderColor = isErr ? "var(--bad)" : "var(--border)";
+  el.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove("show"), 2600);
+}
+
+document.querySelectorAll("nav button").forEach(btn => btn.onclick = () => {
+  document.querySelectorAll("nav button").forEach(b => b.classList.toggle("active", b === btn));
+  document.querySelectorAll("main > section").forEach(s => s.hidden = s.id !== "tab-" + btn.dataset.tab);
+});
+
+const fmtTime = epoch => epoch ? new Date(epoch * 1000).toLocaleString([], {weekday:"short", hour:"numeric", minute:"2-digit"}) : "-";
+
+// ---------- status ----------
+async function refreshStatus() {
+  try {
+    const s = await get("/api/status");
+    $("hostLabel").textContent = "http://" + s.hostname + ".local · v" + s.version;
+    const wifi = $("stWifi");
+    wifi.textContent = s.ap_mode ? "setup AP" : (s.wifi_connected ? s.ssid + " (" + s.rssi + " dBm)" : "disconnected");
+    wifi.className = "pill " + (s.wifi_connected ? "ok" : "err");
+    $("stIp").textContent = s.ip;
+    $("stTime").textContent = s.time_valid ? new Date(s.time * 1000).toLocaleString() : "not synced";
+    const sync = $("stSync");
+    sync.textContent = s.syncing ? "syncing..." :
+      (s.last_sync ? fmtTime(s.last_sync) + (s.last_sync_ok ? "" : " — " + (s.last_error || "errors")) : "never");
+    sync.className = "pill " + (s.last_sync ? (s.last_sync_ok ? "ok" : "err") : "");
+    const pause = $("stPause");
+    if (s.paused) {
+      pause.textContent = s.pause_minutes < 0 ? "Paused indefinitely"
+        : "Paused until " + new Date(s.pause_until * 1000).toLocaleTimeString([], {hour:"numeric", minute:"2-digit"});
+    } else {
+      pause.textContent = "Active";
+    }
+    pause.className = "pill " + (s.paused ? "err" : "ok");
+    // Segmented control: the active pause choice (or Active) is the solid button.
+    document.querySelectorAll("#pauseButtons button[data-mins]").forEach(btn => {
+      const selected = s.paused && parseInt(btn.dataset.mins, 10) === s.pause_minutes;
+      btn.className = selected ? "btn" : "btn ghost";
+    });
+    const resume = $("btnResume");
+    resume.textContent = s.paused ? "Resume" : "Active";
+    resume.className = s.paused ? "btn ghost" : "btn";
+    resume.disabled = !s.paused;
+    resume.style.opacity = s.paused ? "1" : ".85";
+    $("stHeap").textContent = Math.round(s.heap_free / 1024) + " KB (low-water " +
+      Math.round(s.heap_min / 1024) + " KB)" +
+      (s.psram_size ? " · PSRAM " + Math.round(s.psram_free / 1048576 * 10) / 10 + " MB free" : "");
+    $("soundStatus").textContent = !s.audio_present ? "No audio hardware detected." :
+      (s.custom_alarm_sound ? "Using your uploaded sound." : "Using the built-in default sound.");
+  } catch (e) { /* device busy; retry on next tick */ }
+}
+
+function uploadSound() {
+  const file = $("soundFile").files[0];
+  if (!file) return toast("Choose a .wav file first", true);
+  const form = new FormData();
+  form.append("sound", file, file.name);
+  toast("Uploading...");
+  fetch("/api/alarm-sound", {method: "POST", body: form})
+    .then(r => r.ok ? (toast("Alarm sound updated"), refreshStatus())
+                    : r.text().then(t => toast(t || "Upload failed", true)))
+    .catch(() => toast("Upload failed", true));
+}
+
+function resetSound() {
+  post("/api/alarm-sound/reset").then(() => { toast("Reset to default sound"); refreshStatus(); });
+}
+
+async function refreshEvents() {
+  try {
+    const data = await get("/api/events");
+    const list = $("eventList");
+    list.innerHTML = "";
+    if (!data.events.length) list.innerHTML = '<div class="hint">No upcoming events.</div>';
+    for (const ev of data.events) {
+      const row = document.createElement("div");
+      row.className = "row";
+      const left = document.createElement("div");
+      left.innerHTML = '<div class="evtitle"></div><div class="evmeta"></div>';
+      left.querySelector(".evtitle").textContent = ev.title;
+      left.querySelector(".evmeta").textContent =
+        fmtTime(ev.start) + (ev.organizer ? " · " + ev.organizer : "") + (ev.has_link ? " · link" : "");
+      const btn = document.createElement("button");
+      btn.className = "btn ghost small";
+      btn.textContent = "Skip";
+      btn.onclick = () => post("/api/skip", {key: ev.key}).then(() => { toast("Skipped"); refreshEvents(); });
+      row.append(left, btn);
+      list.append(row);
+    }
+    const skips = $("skipList");
+    skips.innerHTML = data.skipped.length ? "" : '<div class="hint">None.</div>';
+    for (const key of data.skipped) {
+      const row = document.createElement("div");
+      row.className = "row";
+      const label = document.createElement("span");
+      label.className = "evmeta";
+      const start = parseInt(key.split("|")[1] || "0", 10);
+      label.textContent = (start ? fmtTime(start) + " · " : "") + key.split("|")[0].slice(0, 40);
+      const btn = document.createElement("button");
+      btn.className = "btn ghost small";
+      btn.textContent = "Unskip";
+      btn.onclick = () => post("/api/unskip", {key}).then(() => { toast("Restored"); refreshEvents(); });
+      row.append(label, btn);
+      skips.append(row);
+    }
+  } catch (e) { }
+}
+
+const pause = minutes => post("/api/pause", {minutes}).then(() => { toast(minutes ? "Alarms paused" : "Alarms active"); refreshStatus(); });
+
+// ---------- calendars ----------
+function addCalRow(name, url, enabled) {
+  const tr = document.createElement("tr");
+  tr.innerHTML = '<td><input type="text" class="calName" style="width:110px"></td>' +
+                 '<td><input type="text" class="calUrl wide" placeholder="https://calendar.google.com/calendar/ical/.../basic.ics"></td>' +
+                 '<td><input type="checkbox" class="calOn"></td>' +
+                 '<td><button class="btn ghost small">✕</button></td>';
+  tr.querySelector(".calName").value = name;
+  tr.querySelector(".calUrl").value = url;
+  tr.querySelector(".calOn").checked = enabled;
+  tr.querySelector("button").onclick = () => tr.remove();
+  document.querySelector("#calTable tbody").append(tr);
+}
+
+async function loadCalendars() {
+  const data = await get("/api/calendars");
+  document.querySelector("#calTable tbody").innerHTML = "";
+  data.calendars.forEach(c => addCalRow(c.name, c.url, c.enabled));
+  if (!data.calendars.length) addCalRow("", "", true);
+}
+
+function saveCalendars() {
+  const calendars = [...document.querySelectorAll("#calTable tbody tr")].map(tr => ({
+    name: tr.querySelector(".calName").value.trim(),
+    url: tr.querySelector(".calUrl").value.trim(),
+    enabled: tr.querySelector(".calOn").checked
+  })).filter(c => c.url);
+  post("/api/calendars", {calendars})
+    .then(() => { toast("Calendars saved — syncing"); loadCalendars(); })
+    .catch(e => toast("Save failed: " + e.message, true));
+}
+
+// ---------- settings ----------
+const SIMPLE_FIELDS = ["use_24_hour_time","poll_interval_minutes","lookahead_days",
+  "alarm_lead_time_minutes","early_meeting_alert_enabled","early_meeting_lead_time_minutes",
+  "alarm_flash_frontlight","alarm_sound_enabled","alarm_volume","alarm_max_minutes",
+  "show_maybe_events","alarm_on_unaccepted_events",
+  "only_alert_with_links","alert_with_any_link","work_hours_enabled"];
+const LIST_FIELDS = ["my_emails","ignore_keywords","always_trigger_keywords","ignore_link_domains"];
+
+function initWorkDays() {
+  const wrap = $("workDays");
+  DAY_NAMES.forEach((name, i) => {
+    const label = document.createElement("label");
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.dataset.day = i + 1;
+    label.append(cb, name);
+    wrap.append(label);
+  });
+}
+
+function initTimezones() {
+  const sel = $("tzSelect");
+  TIMEZONES.forEach(([name, posix]) => {
+    const opt = document.createElement("option");
+    opt.value = name;
+    opt.textContent = name;
+    opt.dataset.posix = posix;
+    sel.append(opt);
+  });
+}
+
+const pad = n => String(n).padStart(2, "0");
+
+async function loadSettings() {
+  const s = await get("/api/settings");
+  for (const f of SIMPLE_FIELDS) {
+    const el = $(f);
+    if (el.type === "checkbox") el.checked = !!s[f];
+    else el.value = s[f] ?? "";
+  }
+  $("volLabel").textContent = (s.alarm_volume ?? 70) + "%";
+  for (const f of LIST_FIELDS) $(f).value = (s[f] || []).join(", ");
+  $("early_before").value = pad(s.early_meeting_before_hour) + ":" + pad(s.early_meeting_before_minute);
+  $("work_start").value = pad(s.work_hours_start_hour) + ":" + pad(s.work_hours_start_minute);
+  $("work_end").value = pad(s.work_hours_end_hour) + ":" + pad(s.work_hours_end_minute);
+  document.querySelectorAll("#workDays input").forEach(cb =>
+    cb.checked = (s.work_days || []).includes(parseInt(cb.dataset.day, 10)));
+  const sel = $("tzSelect");
+  sel.value = s.timezone_name;
+  if (sel.value !== s.timezone_name) {  // not in the list -> add custom entry
+    const opt = document.createElement("option");
+    opt.value = s.timezone_name;
+    opt.textContent = s.timezone_name + " (current)";
+    opt.dataset.posix = s.timezone;
+    sel.append(opt);
+    sel.value = s.timezone_name;
+  }
+}
+
+function saveSettings() {
+  const body = {};
+  for (const f of SIMPLE_FIELDS) {
+    const el = $(f);
+    body[f] = el.type === "checkbox" ? el.checked :
+      (el.type === "number" || el.type === "range" ? parseInt(el.value || "0", 10) : el.value);
+  }
+  for (const f of LIST_FIELDS) {
+    body[f] = $(f).value.split(",").map(s => s.trim()).filter(Boolean);
+  }
+  const [ebH, ebM] = $("early_before").value.split(":").map(Number);
+  body.early_meeting_before_hour = ebH || 0;
+  body.early_meeting_before_minute = ebM || 0;
+  const [wsH, wsM] = $("work_start").value.split(":").map(Number);
+  body.work_hours_start_hour = wsH || 0;
+  body.work_hours_start_minute = wsM || 0;
+  const [weH, weM] = $("work_end").value.split(":").map(Number);
+  body.work_hours_end_hour = weH || 0;
+  body.work_hours_end_minute = weM || 0;
+  body.work_days = [...document.querySelectorAll("#workDays input:checked")]
+    .map(cb => parseInt(cb.dataset.day, 10));
+  const sel = $("tzSelect");
+  const opt = sel.selectedOptions[0];
+  body.timezone_name = sel.value;
+  body.timezone = opt ? opt.dataset.posix : "UTC0";
+  post("/api/settings", body)
+    .then(() => toast("Settings saved"))
+    .catch(e => toast("Save failed: " + e.message, true));
+}
+
+// ---------- wifi ----------
+async function loadWifi() {
+  const data = await get("/api/wifi");
+  let hint = data.ap_mode ?
+    "Device is in setup mode: it reboots and joins your network after you add it. " : "";
+  if (data.last_failed_ssid) {
+    hint += "Last attempt to join \"" + data.last_failed_ssid + "\" failed — " +
+      (data.last_fail_reason || "unknown reason") + ".";
+  }
+  $("wifiHint").textContent = hint;
+  const wrap = $("wifiSaved");
+  wrap.innerHTML = data.saved.length ? "" : '<div class="hint">No saved networks.</div>';
+  for (const ssid of data.saved) {
+    const row = document.createElement("div");
+    row.className = "row";
+    const label = document.createElement("span");
+    label.textContent = ssid + (ssid === data.connected_ssid ? " ✓ connected" : "");
+    const btn = document.createElement("button");
+    btn.className = "btn ghost small";
+    btn.textContent = "Remove";
+    btn.onclick = () => post("/api/wifi/remove", {ssid}).then(loadWifi);
+    row.append(label, btn);
+    wrap.append(row);
+  }
+}
+
+function addWifi() {
+  const ssid = $("newSsid").value.trim();
+  if (!ssid) return toast("Enter an SSID", true);
+  post("/api/wifi/add", {ssid, password: $("newPass").value})
+    .then(() => { toast("Network saved"); $("newSsid").value = ""; $("newPass").value = ""; loadWifi(); })
+    .catch(e => toast("Failed: " + e.message, true));
+}
+
+async function scanWifi() {
+  $("scanResults").innerHTML = '<div class="hint">Scanning... (if you are on the WakeInk-Setup network this can take a few seconds and may briefly drop the connection)</div>';
+  try {
+    let data = null;
+    for (let i = 0; i < 20; i++) {  // poll the async scan up to ~20s
+      try { data = await get("/api/wifi/scan"); } catch (e) { data = {scanning: true}; }
+      if (!data.scanning) break;
+      await new Promise(r => setTimeout(r, 1000));
+    }
+    if (!data || data.scanning) throw new Error("timeout");
+    const wrap = $("scanResults");
+    wrap.innerHTML = data.networks.length ? "" : '<div class="hint">Nothing found.</div>';
+    for (const net of data.networks) {
+      const row = document.createElement("div");
+      row.className = "row";
+      const label = document.createElement("span");
+      label.textContent = net.ssid + " (" + net.rssi + " dBm)" + (net.secure ? " 🔒" : "");
+      const btn = document.createElement("button");
+      btn.className = "btn ghost small";
+      btn.textContent = "Use";
+      btn.onclick = () => { $("newSsid").value = net.ssid; $("newPass").focus(); };
+      row.append(label, btn);
+      wrap.append(row);
+    }
+  } catch (e) { $("scanResults").innerHTML = '<div class="hint">Scan failed.</div>'; }
+}
+
+// ---------- boot ----------
+initWorkDays();
+initTimezones();
+refreshStatus(); refreshEvents();
+loadCalendars().catch(() => {});
+loadSettings().catch(() => {});
+loadWifi().catch(() => {});
+setInterval(refreshStatus, 5000);
+setInterval(refreshEvents, 30000);
+</script>
+</body>
+</html>
