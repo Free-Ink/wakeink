@@ -387,8 +387,10 @@ void SettingsScreen::drawNormal(SettingsCanvas& c) {
       }
       case Kind::STEPPER: {
         const String v = valueFor(row.item);
-        ui::drawText(t, ui::Rect{W - 196, midY, 100, ROW_H}, v.c_str(),
+        ui::drawText(t, ui::Rect{W - 216, midY, 96, ROW_H}, v.c_str(),
                      txt(FONT_SMALL_B, ui::Color::Black, ui::TextAlign::Right));
+        // Wide [-]/[+] targets (52px visual, 56px band, ~11mm) — small steppers
+        // plus finger scatter made repeated taps unreliable.
         ui::ButtonProps minus;
         minus.label = "-";
         minus.action = A_DEC;
@@ -396,15 +398,14 @@ void SettingsScreen::drawNormal(SettingsCanvas& c) {
         minus.text = txt(FONT_BODY_B, ui::Color::Black, ui::TextAlign::Center);
         minus.styles = ghostButton();
         minus.minTouchSize = 0;
-        ui::button(c.frame, ui::Rect{W - 88, (int16_t)(y + 2), 38, ROW_H - 6}, minus);
+        ui::button(c.frame, ui::Rect{W - 114, (int16_t)(y + 2), 52, ROW_H - 4}, minus);
         ui::ButtonProps plus = minus;
         plus.label = "+";
         plus.action = A_INC;
-        ui::button(c.frame, ui::Rect{W - 46, (int16_t)(y + 2), 38, ROW_H - 6}, plus);
-        // Contiguous bands: [-] owns W-92..W-48, [+] owns W-48..W-4 — no dead
-        // slit between or around them.
-        hitBand(W - 92, 44, y, A_DEC, row.item);
-        hitBand(W - 48, 44, y, A_INC, row.item);
+        ui::button(c.frame, ui::Rect{W - 58, (int16_t)(y + 2), 52, ROW_H - 4}, plus);
+        // Contiguous bands: [-] owns W-118..W-60, [+] owns W-60..W-2.
+        hitBand(W - 118, 58, y, A_DEC, row.item);
+        hitBand(W - 60, 58, y, A_INC, row.item);
         break;
       }
       case Kind::ACTION: {
