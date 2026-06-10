@@ -308,13 +308,15 @@ void SettingsScreen::draw(EInkDisplay::RefreshMode mode) {
 void SettingsScreen::drawNormal(SettingsCanvas& c) {
   ui::DrawTarget& t = c.target;
 
-  // Fingers register low near the bezel, so controls near the bottom edge get
-  // their hit zone extended DOWN to the screen edge (downward only — centered
-  // minTouchSize expansion bleeds up into the row above and steals its taps).
-  auto extendDown = [&](const ui::Rect& r, ui::ActionId a, int16_t v) {
-    if (r.bottom() >= 200 && r.bottom() < H) {
-      c.frame.hit(ui::Rect{r.x, r.bottom(), r.width, (int16_t)(H - r.bottom())}, a, v);
-    }
+  // Hit bands: the visual buttons are 22px tall in a 28px row with small gaps,
+  // leaving dead pixels above/below/between them that made taps feel random.
+  // Each control also registers a contiguous full-row-height band (extended to
+  // the bezel on the last row), so every pixel near a control routes to it.
+  // Bands within a row use disjoint x-ranges, so nothing steals a neighbor's tap.
+  auto hitBand = [&](int16_t x, int16_t w, int16_t rowY, ui::ActionId a, int16_t v) {
+    const bool bottomRow = rowY + ROW_H >= H - 12;
+    const int16_t hgt = bottomRow ? (int16_t)(H - rowY) : (int16_t)ROW_H;
+    c.frame.hit(ui::Rect{x, rowY, w, hgt}, a, v);
   };
 
   // Header: title + Close (Back button routes here too).
@@ -377,9 +379,8 @@ void SettingsScreen::drawNormal(SettingsCanvas& c) {
         b.text = txt(FONT_SMALL_B, ui::Color::Black, ui::TextAlign::Center);
         b.styles = ghostButton();
         b.minTouchSize = 0;
-        const ui::Rect r{W - 70, (int16_t)(y + 2), 60, ROW_H - 6};
-        ui::button(c.frame, r, b);
-        extendDown(r, A_TOGGLE, row.item);
+        ui::button(c.frame, ui::Rect{W - 70, (int16_t)(y + 2), 60, ROW_H - 6}, b);
+        hitBand(W - 74, 70, y, A_TOGGLE, row.item);
         break;
       }
       case Kind::STEPPER: {
@@ -393,15 +394,15 @@ void SettingsScreen::drawNormal(SettingsCanvas& c) {
         minus.text = txt(FONT_BODY_B, ui::Color::Black, ui::TextAlign::Center);
         minus.styles = ghostButton();
         minus.minTouchSize = 0;
-        const ui::Rect rMinus{W - 88, (int16_t)(y + 2), 38, ROW_H - 6};
-        ui::button(c.frame, rMinus, minus);
-        extendDown(rMinus, A_DEC, row.item);
+        ui::button(c.frame, ui::Rect{W - 88, (int16_t)(y + 2), 38, ROW_H - 6}, minus);
         ui::ButtonProps plus = minus;
         plus.label = "+";
         plus.action = A_INC;
-        const ui::Rect rPlus{W - 46, (int16_t)(y + 2), 38, ROW_H - 6};
-        ui::button(c.frame, rPlus, plus);
-        extendDown(rPlus, A_INC, row.item);
+        ui::button(c.frame, ui::Rect{W - 46, (int16_t)(y + 2), 38, ROW_H - 6}, plus);
+        // Contiguous bands: [-] owns W-92..W-48, [+] owns W-48..W-4 — no dead
+        // slit between or around them.
+        hitBand(W - 92, 44, y, A_DEC, row.item);
+        hitBand(W - 48, 44, y, A_INC, row.item);
         break;
       }
       case Kind::ACTION: {
@@ -415,9 +416,8 @@ void SettingsScreen::drawNormal(SettingsCanvas& c) {
         // Full-width action button replaces the plain label.
         t.fill(ui::Rect{8, midY, 200, ROW_H}, ui::Paint::solid(ui::Color::White), 0,
                ui::CornersAll);  // erase the label drawn above
-        const ui::Rect r{8, (int16_t)(y + 2), W - 16, ROW_H - 6};
-        ui::button(c.frame, r, b);
-        extendDown(r, A_DO, row.item);
+        ui::button(c.frame, ui::Rect{8, (int16_t)(y + 2), W - 16, ROW_H - 6}, b);
+        hitBand(0, W, y, A_DO, row.item);
         break;
       }
       case Kind::PICKER: {
@@ -443,10 +443,9 @@ void SettingsScreen::drawNormal(SettingsCanvas& c) {
           chip.text = txt(FONT_SMALL_B, ui::Color::Black, ui::TextAlign::Center);
           chip.styles = ghostButton();
           chip.minTouchSize = 0;
-          const ui::Rect rChip{(int16_t)(W - 10 - (8 - d) * (chipW + 2)), (int16_t)(y + 2), chipW,
-                               ROW_H - 6};
-          ui::button(c.frame, rChip, chip);
-          extendDown(rChip, A_DAY, (int16_t)d);
+          const int16_t chipX = (int16_t)(W - 10 - (8 - d) * (chipW + 2));
+          ui::button(c.frame, ui::Rect{chipX, (int16_t)(y + 2), chipW, ROW_H - 6}, chip);
+          hitBand((int16_t)(chipX - 1), chipW + 2, y, A_DAY, (int16_t)d);
         }
         break;
       }
@@ -472,17 +471,15 @@ void SettingsScreen::drawNormal(SettingsCanvas& c) {
     prev.styles = ghostButton();
     prev.minTouchSize = 0;
     prev.enabled = page_ > 0;
-    const ui::Rect rPrev{8, (int16_t)(y + 2), 110, ROW_H - 6};
-    ui::button(c.frame, rPrev, prev);
-    if (prev.enabled) extendDown(rPrev, A_PAGE, prev.value);
+    ui::button(c.frame, ui::Rect{8, (int16_t)(y + 2), 110, ROW_H - 6}, prev);
+    if (prev.enabled) hitBand(0, 124, y, A_PAGE, prev.value);
 
     ui::ButtonProps nextB = prev;
     nextB.label = "Next >";
     nextB.value = (int16_t)(page_ + 1);
     nextB.enabled = page_ + 1 < pageCount;
-    const ui::Rect rNext{W - 118, (int16_t)(y + 2), 110, ROW_H - 6};
-    ui::button(c.frame, rNext, nextB);
-    if (nextB.enabled) extendDown(rNext, A_PAGE, nextB.value);
+    ui::button(c.frame, ui::Rect{W - 118, (int16_t)(y + 2), 110, ROW_H - 6}, nextB);
+    if (nextB.enabled) hitBand(W - 124, 124, y, A_PAGE, nextB.value);
 
     const String pos = "Page " + String(page_ + 1) + " of " + String(pageCount);
     ui::drawText(t, ui::Rect{126, y, W - 252, ROW_H}, pos.c_str(),
@@ -629,10 +626,16 @@ void SettingsScreen::applyToggle(int16_t item) {
 void SettingsScreen::applyStep(int16_t item, int dir) {
   AppSettings& s = settings();
   auto clampi = [](int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); };
+  // Lead times: floor of 1 minute (0 = alarm at meeting start, pointless);
+  // fine steps below 5 so the low values are actually reachable.
+  auto stepLead = [&](int v) {
+    const int step = (v < 5 || (v == 5 && dir < 0)) ? 1 : 5;
+    return clampi(v + dir * step, 1, 120);
+  };
   switch (item) {
-    case IT_LEAD: s.alarmLeadTimeMinutes = clampi(s.alarmLeadTimeMinutes + dir * 5, 0, 120); break;
+    case IT_LEAD: s.alarmLeadTimeMinutes = stepLead(s.alarmLeadTimeMinutes); break;
     case IT_EARLY_LEAD:
-      s.earlyMeetingLeadTimeMinutes = clampi(s.earlyMeetingLeadTimeMinutes + dir * 5, 0, 120);
+      s.earlyMeetingLeadTimeMinutes = stepLead(s.earlyMeetingLeadTimeMinutes);
       break;
     case IT_EARLY_BEFORE:
       stepTimeOfDay(s.earlyMeetingBeforeHour, s.earlyMeetingBeforeMinute, dir);

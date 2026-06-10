@@ -80,6 +80,7 @@ void AppSettings::fromJson(const JsonDocument& doc) {
   }
 
   alarmLeadTimeMinutes = doc["alarm_lead_time_minutes"] | alarmLeadTimeMinutes;
+  if (alarmLeadTimeMinutes < 1) alarmLeadTimeMinutes = 1;
   earlyMeetingAlertEnabled = doc["early_meeting_alert_enabled"] | earlyMeetingAlertEnabled;
   earlyMeetingBeforeHour = doc["early_meeting_before_hour"] | earlyMeetingBeforeHour;
   earlyMeetingBeforeMinute = doc["early_meeting_before_minute"] | earlyMeetingBeforeMinute;
