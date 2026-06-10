@@ -130,6 +130,8 @@ void CalendarManager::runSync() {
       if (eventfilter::passes(ev, cfg, stateStore())) {
         ev.hasLink = eventfilter::hasJoinableLink(ev);
         ev.description = String();
+        ev.urls.clear();
+        ev.urls.shrink_to_fit();
         filtered.push_back(std::move(ev));
       }
     }

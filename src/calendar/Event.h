@@ -2,6 +2,8 @@
 
 #include <Arduino.h>
 
+#include <vector>
+
 // One concrete event occurrence (recurring events are expanded into
 // individual occurrences inside the lookahead window).
 
@@ -35,6 +37,12 @@ struct Event {
   bool allDay = false;
   // Computed at sync time (description is dropped after filtering to save RAM).
   bool hasLink = false;
+  // Link facts captured by the parser from the FULL property text before the
+  // stored description is truncated (Google puts the Meet link ~1KB deep in
+  // its boilerplate) and from X-GOOGLE-CONFERENCE. urls are lowercased, capped,
+  // and cleared after filtering alongside description.
+  bool linkJoinable = false;
+  std::vector<String> urls;
   EventStatus status = EventStatus::CONFIRMED;
   SelfStatus selfStatus = SelfStatus::UNKNOWN;
   uint8_t calIndex = 0;

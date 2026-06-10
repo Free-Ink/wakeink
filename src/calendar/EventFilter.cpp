@@ -25,49 +25,63 @@ static bool containsKeyword(const String& haystackLower, const std::vector<Strin
   return false;
 }
 
-bool hasJoinableLink(const Event& ev) {
-  const String loc = lower(ev.location);
-  const String desc = lower(ev.description);
+bool textHasMeetingDomain(const String& lowerText) {
   for (const char* domain : KNOWN_MEETING_DOMAINS) {
-    if (loc.indexOf(domain) >= 0 || desc.indexOf(domain) >= 0) return true;
+    if (lowerText.indexOf(domain) >= 0) return true;
   }
   return false;
 }
 
-// Scans for http(s):// URLs and returns true if any of them is NOT on the
-// ignore list (mirrors the app's hasAnyLink regex walk).
-static bool hasAnyCountedLink(const Event& ev, const std::vector<String>& ignoreDomains) {
-  const String texts[2] = {lower(ev.location), lower(ev.description)};
-  for (const String& text : texts) {
-    int pos = 0;
-    while (true) {
-      int idx = text.indexOf("http://", pos);
-      int idxS = text.indexOf("https://", pos);
-      if (idx < 0 || (idxS >= 0 && idxS < idx)) idx = idxS;
-      if (idx < 0) break;
-      int end = idx;
-      while (end < (int)text.length()) {
-        const char c = text[end];
-        if (c == ' ' || c == '\t' || c == '<' || c == '>' || c == '"' || c == ')' || c == ']' ||
-            c == '\n') {
-          break;
-        }
-        ++end;
+void collectUrls(const String& lowerText, std::vector<String>& out, size_t maxUrls) {
+  constexpr size_t MAX_URL_LEN = 96;  // plenty for domain matching
+  int pos = 0;
+  while (out.size() < maxUrls) {
+    int idx = lowerText.indexOf("http://", pos);
+    const int idxS = lowerText.indexOf("https://", pos);
+    if (idx < 0 || (idxS >= 0 && idxS < idx)) idx = idxS;
+    if (idx < 0) break;
+    int end = idx;
+    while (end < (int)lowerText.length()) {
+      const char c = lowerText[end];
+      if (c == ' ' || c == '\t' || c == '<' || c == '>' || c == '"' || c == ')' || c == ']' ||
+          c == '\n') {
+        break;
       }
-      const String url = text.substring(idx, end);
-      bool ignored = false;
-      for (const auto& domRaw : ignoreDomains) {
-        String dom = domRaw;
-        dom.trim();
-        dom.toLowerCase();
-        if (!dom.isEmpty() && url.indexOf(dom) >= 0) {
-          ignored = true;
-          break;
-        }
-      }
-      if (!ignored) return true;
-      pos = end;
+      ++end;
     }
+    String url = lowerText.substring(idx, end);
+    if (url.length() > MAX_URL_LEN) url = url.substring(0, MAX_URL_LEN);
+    out.push_back(url);
+    pos = end;
+  }
+}
+
+bool hasJoinableLink(const Event& ev) {
+  // Parse-time flag first: it saw the FULL description (the stored copy is
+  // truncated and Google's Meet link usually sits past the cap).
+  if (ev.linkJoinable) return true;
+  if (textHasMeetingDomain(lower(ev.location))) return true;
+  return textHasMeetingDomain(lower(ev.description));
+}
+
+// True if any URL (parser-collected from full text, plus any in the retained
+// location/description) is NOT on the ignore list — the app's hasAnyLink walk.
+static bool hasAnyCountedLink(const Event& ev, const std::vector<String>& ignoreDomains) {
+  std::vector<String> urls = ev.urls;
+  collectUrls(lower(ev.location), urls, urls.size() + 4);
+  collectUrls(lower(ev.description), urls, urls.size() + 4);
+  for (const String& url : urls) {
+    bool ignored = false;
+    for (const auto& domRaw : ignoreDomains) {
+      String dom = domRaw;
+      dom.trim();
+      dom.toLowerCase();
+      if (!dom.isEmpty() && url.indexOf(dom) >= 0) {
+        ignored = true;
+        break;
+      }
+    }
+    if (!ignored) return true;
   }
   return false;
 }

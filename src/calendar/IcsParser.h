@@ -64,6 +64,9 @@ class IcsParser {
 
   struct RawEvent {
     String uid, summary, location, description, organizer;
+    // Link facts from FULL text (before truncation) + X-GOOGLE-CONFERENCE.
+    bool linkJoinable = false;
+    std::vector<String> urls;
     String dtStart, dtStartParams;
     String dtEnd, dtEndParams;
     String duration;

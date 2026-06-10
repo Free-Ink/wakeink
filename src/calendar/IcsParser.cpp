@@ -2,6 +2,7 @@
 
 #include <cstdlib>
 
+#include "EventFilter.h"
 #include "TimeUtil.h"
 
 namespace {
@@ -498,11 +499,33 @@ void IcsParser::handleEventProp(const String& name, const String& params, const 
     if (raw_.summary.length() > MAX_TITLE) raw_.summary = raw_.summary.substring(0, MAX_TITLE);
   } else if (name == "LOCATION") {
     raw_.location = unescapeText(value);
+    // Link-scan the FULL text before capping for storage.
+    String low = raw_.location;
+    low.toLowerCase();
+    if (eventfilter::textHasMeetingDomain(low)) raw_.linkJoinable = true;
+    eventfilter::collectUrls(low, raw_.urls, 4);
     if (raw_.location.length() > MAX_LOCATION) raw_.location = raw_.location.substring(0, MAX_LOCATION);
   } else if (name == "DESCRIPTION") {
     String text = unescapeText(value);
+    // Link-scan the FULL description: Google's Meet link sits ~1KB into its
+    // boilerplate, far past the storage cap, and the links-only filter was
+    // silently dropping those events.
+    String low = text;
+    low.toLowerCase();
+    if (eventfilter::textHasMeetingDomain(low)) raw_.linkJoinable = true;
+    eventfilter::collectUrls(low, raw_.urls, 4);
     if (text.length() > MAX_DESCRIPTION) text = text.substring(0, MAX_DESCRIPTION);
     raw_.description = text;
+  } else if (name == "X-GOOGLE-CONFERENCE") {
+    // Dedicated conference property — a joinable link by definition.
+    if (value.startsWith("http")) {
+      raw_.linkJoinable = true;
+      if (raw_.urls.size() < 4) {
+        String low = value;
+        low.toLowerCase();
+        raw_.urls.push_back(low.length() > 96 ? low.substring(0, 96) : low);
+      }
+    }
   } else if (name == "DTSTART") {
     raw_.dtStart = value;
     raw_.dtStartParams = params;
@@ -588,6 +611,8 @@ void IcsParser::emitOccurrence(const RawEvent& raw, time_t start, long durationS
   ev.organizer = raw.organizer;
   ev.location = raw.location;
   ev.description = raw.description;
+  ev.linkJoinable = raw.linkJoinable;
+  ev.urls = raw.urls;
   ev.start = start;
   ev.end = end;
   ev.allDay = allDay;
@@ -639,6 +664,8 @@ void IcsParser::endEvent() {
     ov.organizer = raw_.organizer;
     ov.location = raw_.location;
     ov.description = raw_.description;
+    ov.linkJoinable = raw_.linkJoinable;
+    ov.urls = raw_.urls;
     ov.start = dtStart;
     ov.end = dtStart + durationSec;
     ov.allDay = isDate;

@@ -36,4 +36,10 @@ int leadTimeMinutes(const Event& ev, const AppSettings& s);
 // Exposed for the web UI's status output.
 bool hasJoinableLink(const Event& ev);
 
+// Parse-time helpers (the parser scans FULL property text before truncation):
+// known meeting-platform domain anywhere in lowercased text.
+bool textHasMeetingDomain(const String& lowerText);
+// Append up to maxUrls http(s) URLs (lowercased, length-capped) found in text.
+void collectUrls(const String& lowerText, std::vector<String>& out, size_t maxUrls);
+
 }  // namespace eventfilter
