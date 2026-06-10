@@ -40,7 +40,10 @@ class SettingsScreen {
  private:
   enum class Modal { NONE, TZ_PICKER, PAUSE, REBOOT };
 
-  void draw(bool full);
+  // Refresh tiering: structural changes (tab/page/modal swaps) move big black
+  // regions and need a ghost-clearing pass or the previous frame's residue
+  // reads as "dithered" trash; small value tweaks can stay FAST.
+  void draw(EInkDisplay::RefreshMode mode);
   void drawNormal(class SettingsCanvas& c);
   void drawTzPicker(class SettingsCanvas& c);
   void overlayPause(class SettingsCanvas& c);

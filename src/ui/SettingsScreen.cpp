@@ -148,6 +148,12 @@ ui::StyleSet ghostButton() {
   st.normal.borderWidth = 1;
   st.selected.background = ui::Paint::solid(ui::Color::Black);
   st.selected.foreground = ui::Paint::solid(ui::Color::White);
+  // Disabled: keep the box visible, mute the label (dither renders as
+  // speckled "grey" text on the 1-bit panel).
+  st.disabled.background = ui::Paint::solid(ui::Color::White);
+  st.disabled.border = ui::Paint::solid(ui::Color::Black);
+  st.disabled.borderWidth = 1;
+  st.disabled.foreground = ui::Paint::dither(ui::Color::LightGray);
   return st;
 }
 
@@ -279,12 +285,12 @@ void SettingsScreen::open() {
   tab_ = 0;
   page_ = 0;
   modal_ = Modal::NONE;
-  draw(true);
+  draw(EInkDisplay::FULL_REFRESH);
 }
 
-void SettingsScreen::redraw() { draw(false); }
+void SettingsScreen::redraw() { draw(EInkDisplay::FAST_REFRESH); }
 
-void SettingsScreen::draw(bool full) {
+void SettingsScreen::draw(EInkDisplay::RefreshMode mode) {
   display_.clearScreen(0xFF);
   SettingsCanvas c(display_.getFrameBuffer(), interactions_);
 
@@ -296,7 +302,7 @@ void SettingsScreen::draw(bool full) {
     if (modal_ == Modal::REBOOT) overlayReboot(c);
   }
 
-  display_.displayBuffer(full ? EInkDisplay::FULL_REFRESH : EInkDisplay::FAST_REFRESH);
+  display_.displayBuffer(mode);
 }
 
 void SettingsScreen::drawNormal(SettingsCanvas& c) {
@@ -437,15 +443,31 @@ void SettingsScreen::drawNormal(SettingsCanvas& c) {
   }
 
   if (paged) {
-    String label = "More  (" + String(page_ + 1) + "/" + String(pageCount) + ")";
-    ui::ButtonProps pager;
-    pager.label = label.c_str();
-    pager.action = A_PAGE;
-    pager.value = (int16_t)((page_ + 1) % pageCount);
-    pager.text = txt(FONT_SMALL_B, ui::Color::Black, ui::TextAlign::Center);
-    pager.styles = ghostButton();
-    pager.minTouchSize = 0;
-    ui::button(c.frame, ui::Rect{8, (int16_t)(y + 2), W - 16, ROW_H - 6}, pager);
+    // Explicit pager: Prev / "Page x of y" / Next (a lone cycling "More"
+    // button read as a status line, not a control). Anchored to the last row
+    // slot so it doesn't ride up when a page has fewer rows.
+    y = CONTENT_Y + (MAX_ROWS - 1) * ROW_H;
+    ui::ButtonProps prev;
+    prev.label = "< Prev";
+    prev.action = A_PAGE;
+    prev.value = (int16_t)(page_ - 1);
+    prev.text = txt(FONT_SMALL_B, ui::Color::Black, ui::TextAlign::Center);
+    prev.styles = ghostButton();
+    // Bottom-edge buttons need the expanded touch target: fingers register low
+    // near the bezel and a 22px rect ending at y=230 misses into the dead strip.
+    prev.minTouchSize = 44;
+    prev.enabled = page_ > 0;
+    ui::button(c.frame, ui::Rect{8, (int16_t)(y + 2), 110, ROW_H - 6}, prev);
+
+    ui::ButtonProps nextB = prev;
+    nextB.label = "Next >";
+    nextB.value = (int16_t)(page_ + 1);
+    nextB.enabled = page_ + 1 < pageCount;
+    ui::button(c.frame, ui::Rect{W - 118, (int16_t)(y + 2), 110, ROW_H - 6}, nextB);
+
+    const String pos = "Page " + String(page_ + 1) + " of " + String(pageCount);
+    ui::drawText(t, ui::Rect{126, y, W - 252, ROW_H}, pos.c_str(),
+                 txt(FONT_TINY, ui::Color::Black, ui::TextAlign::Center));
   }
 }
 
@@ -494,7 +516,7 @@ void SettingsScreen::drawTzPicker(SettingsCanvas& c) {
   prev.value = (int16_t)-visible;
   prev.text = txt(FONT_SMALL_B, ui::Color::Black, ui::TextAlign::Center);
   prev.styles = ghostButton();
-  prev.minTouchSize = 0;
+  prev.minTouchSize = 44;  // bottom-edge target (see the Filter pager note)
   prev.enabled = tzTop_ > 0;
   ui::button(c.frame, ui::Rect{8, H - 32, 120, 28}, prev);
 
@@ -533,7 +555,9 @@ void SettingsScreen::overlayPause(SettingsCanvas& c) {
   d.buttonHeight = 30;
   d.gap = 5;
   d.verticalOptions = true;
-  d.dimBackground = true;
+  // No dim scrim: the LightGray dither reads as broken speckle on a 1-bit
+  // panel; the bordered panel separates fine on its own.
+  d.dimBackground = false;
   const int16_t w = 220;
   const int16_t h = ui::optionDialogHeight(c.target, d, w);
   ui::optionDialog(c.frame, ui::Rect{(int16_t)((W - w) / 2), (int16_t)((H - h) / 2), w, h}, d);
@@ -557,7 +581,7 @@ void SettingsScreen::overlayReboot(SettingsCanvas& c) {
   d.styles = panel;
   d.buttonHeight = 34;
   d.inputMask = ui::InputDefault | ui::InputBack;
-  d.dimBackground = true;
+  d.dimBackground = false;  // see overlayPause: dither scrim looks broken on 1-bit
   const int16_t w = 260;
   const int16_t h = ui::optionDialogHeight(c.target, d, w);
   ui::optionDialog(c.frame, ui::Rect{(int16_t)((W - w) / 2), (int16_t)((H - h) / 2), w, h}, d);
@@ -640,8 +664,12 @@ void SettingsScreen::persist(int16_t item) {
 
 SettingsScreen::Result SettingsScreen::handleInput(const ui::InputSnapshot& snap) {
   const ui::ActionEvent ev = interactions_.route(snap);
+  Serial.printf("[settings] route action=%u value=%d tap=(%d,%d) tab=%d page=%d modal=%d\n",
+                (unsigned)ev.action, (int)ev.value, (int)snap.touchX, (int)snap.touchY, tab_,
+                page_, (int)modal_);
 
   if (modal_ == Modal::TZ_PICKER) {
+    bool structural = false;
     if (ev.action == A_TZ_ROW && ev.value >= 0 && ev.value < (int)TIMEZONE_COUNT) {
       calendarManager().lockConfig();
       settings().timezoneName = TIMEZONES[ev.value].name;
@@ -651,15 +679,18 @@ SettingsScreen::Result SettingsScreen::handleInput(const ui::InputSnapshot& snap
       wifiService().applyTimeConfig();
       calendarManager().requestSync();
       modal_ = Modal::NONE;
+      structural = true;
     } else if (ev.action == A_TZ_PG) {
       int next = (int)tzTop_ + ev.value;
       if (next < 0) next = 0;
       if (next >= (int)TIMEZONE_COUNT) next = tzTop_;  // shouldn't happen (button disabled)
       tzTop_ = (uint16_t)next;
+      structural = true;  // a whole page of list text moves
     } else if (ev.action == A_CLOSE || (!ev && snap.back)) {
       modal_ = Modal::NONE;
+      structural = true;
     }
-    draw(false);
+    draw(structural ? EInkDisplay::HALF_REFRESH : EInkDisplay::FAST_REFRESH);
     return Result::NONE;
   }
 
@@ -678,7 +709,7 @@ SettingsScreen::Result SettingsScreen::handleInput(const ui::InputSnapshot& snap
       calendarManager().unlockConfig();
     }
     modal_ = Modal::NONE;  // any tap (option or outside) closes the dialog
-    draw(false);
+    draw(EInkDisplay::HALF_REFRESH);
     return Result::NONE;
   }
 
@@ -689,20 +720,24 @@ SettingsScreen::Result SettingsScreen::handleInput(const ui::InputSnapshot& snap
       ESP.restart();
     }
     modal_ = Modal::NONE;
-    draw(false);
+    draw(EInkDisplay::HALF_REFRESH);
     return Result::NONE;
   }
 
-  // Normal (tabbed) view.
+  // Normal (tabbed) view. Tab/page/dialog transitions repaint large regions,
+  // so they take the ghost-clearing HALF refresh; value tweaks stay FAST.
+  bool structural = false;
   switch (ev.action) {
     case A_CLOSE:
       return Result::CLOSED;
     case A_TAB:
       tab_ = ev.value;
       page_ = 0;
+      structural = true;
       break;
     case A_PAGE:
-      page_ = ev.value;
+      page_ = ev.value < 0 ? 0 : ev.value;  // draw() re-clamps against pageCount
+      structural = true;
       break;
     case A_TOGGLE:
       applyToggle(ev.value);
@@ -720,12 +755,13 @@ SettingsScreen::Result SettingsScreen::handleInput(const ui::InputSnapshot& snap
       switch (ev.value) {
         case IT_TEST: return Result::TEST_ALARM;
         case IT_SYNC: calendarManager().requestSync(); break;
-        case IT_REBOOT: modal_ = Modal::REBOOT; break;
-        case IT_PAUSE: modal_ = Modal::PAUSE; break;
+        case IT_REBOOT: modal_ = Modal::REBOOT; structural = true; break;
+        case IT_PAUSE: modal_ = Modal::PAUSE; structural = true; break;
         case IT_TZ: {
           modal_ = Modal::TZ_PICKER;
           const int cur = currentTzIndex();
           tzTop_ = cur > 2 ? (uint16_t)(cur - 2) : 0;
+          structural = true;
           break;
         }
         default: break;
@@ -736,6 +772,6 @@ SettingsScreen::Result SettingsScreen::handleInput(const ui::InputSnapshot& snap
       break;
   }
 
-  draw(false);
+  draw(structural ? EInkDisplay::HALF_REFRESH : EInkDisplay::FAST_REFRESH);
   return Result::NONE;
 }
