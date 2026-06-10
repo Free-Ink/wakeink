@@ -308,6 +308,15 @@ void SettingsScreen::draw(EInkDisplay::RefreshMode mode) {
 void SettingsScreen::drawNormal(SettingsCanvas& c) {
   ui::DrawTarget& t = c.target;
 
+  // Fingers register low near the bezel, so controls near the bottom edge get
+  // their hit zone extended DOWN to the screen edge (downward only — centered
+  // minTouchSize expansion bleeds up into the row above and steals its taps).
+  auto extendDown = [&](const ui::Rect& r, ui::ActionId a, int16_t v) {
+    if (r.bottom() >= 200 && r.bottom() < H) {
+      c.frame.hit(ui::Rect{r.x, r.bottom(), r.width, (int16_t)(H - r.bottom())}, a, v);
+    }
+  };
+
   // Header: title + Close (Back button routes here too).
   ui::HeaderProps hp;
   hp.title = "Settings";
@@ -368,7 +377,9 @@ void SettingsScreen::drawNormal(SettingsCanvas& c) {
         b.text = txt(FONT_SMALL_B, ui::Color::Black, ui::TextAlign::Center);
         b.styles = ghostButton();
         b.minTouchSize = 0;
-        ui::button(c.frame, ui::Rect{W - 70, (int16_t)(y + 2), 60, ROW_H - 6}, b);
+        const ui::Rect r{W - 70, (int16_t)(y + 2), 60, ROW_H - 6};
+        ui::button(c.frame, r, b);
+        extendDown(r, A_TOGGLE, row.item);
         break;
       }
       case Kind::STEPPER: {
@@ -382,11 +393,15 @@ void SettingsScreen::drawNormal(SettingsCanvas& c) {
         minus.text = txt(FONT_BODY_B, ui::Color::Black, ui::TextAlign::Center);
         minus.styles = ghostButton();
         minus.minTouchSize = 0;
-        ui::button(c.frame, ui::Rect{W - 88, (int16_t)(y + 2), 38, ROW_H - 6}, minus);
+        const ui::Rect rMinus{W - 88, (int16_t)(y + 2), 38, ROW_H - 6};
+        ui::button(c.frame, rMinus, minus);
+        extendDown(rMinus, A_DEC, row.item);
         ui::ButtonProps plus = minus;
         plus.label = "+";
         plus.action = A_INC;
-        ui::button(c.frame, ui::Rect{W - 46, (int16_t)(y + 2), 38, ROW_H - 6}, plus);
+        const ui::Rect rPlus{W - 46, (int16_t)(y + 2), 38, ROW_H - 6};
+        ui::button(c.frame, rPlus, plus);
+        extendDown(rPlus, A_INC, row.item);
         break;
       }
       case Kind::ACTION: {
@@ -400,7 +415,9 @@ void SettingsScreen::drawNormal(SettingsCanvas& c) {
         // Full-width action button replaces the plain label.
         t.fill(ui::Rect{8, midY, 200, ROW_H}, ui::Paint::solid(ui::Color::White), 0,
                ui::CornersAll);  // erase the label drawn above
-        ui::button(c.frame, ui::Rect{8, (int16_t)(y + 2), W - 16, ROW_H - 6}, b);
+        const ui::Rect r{8, (int16_t)(y + 2), W - 16, ROW_H - 6};
+        ui::button(c.frame, r, b);
+        extendDown(r, A_DO, row.item);
         break;
       }
       case Kind::PICKER: {
@@ -426,10 +443,10 @@ void SettingsScreen::drawNormal(SettingsCanvas& c) {
           chip.text = txt(FONT_SMALL_B, ui::Color::Black, ui::TextAlign::Center);
           chip.styles = ghostButton();
           chip.minTouchSize = 0;
-          ui::button(c.frame,
-                     ui::Rect{(int16_t)(W - 10 - (8 - d) * (chipW + 2)), (int16_t)(y + 2),
-                              chipW, ROW_H - 6},
-                     chip);
+          const ui::Rect rChip{(int16_t)(W - 10 - (8 - d) * (chipW + 2)), (int16_t)(y + 2), chipW,
+                               ROW_H - 6};
+          ui::button(c.frame, rChip, chip);
+          extendDown(rChip, A_DAY, (int16_t)d);
         }
         break;
       }
@@ -453,17 +470,19 @@ void SettingsScreen::drawNormal(SettingsCanvas& c) {
     prev.value = (int16_t)(page_ - 1);
     prev.text = txt(FONT_SMALL_B, ui::Color::Black, ui::TextAlign::Center);
     prev.styles = ghostButton();
-    // Bottom-edge buttons need the expanded touch target: fingers register low
-    // near the bezel and a 22px rect ending at y=230 misses into the dead strip.
-    prev.minTouchSize = 44;
+    prev.minTouchSize = 0;
     prev.enabled = page_ > 0;
-    ui::button(c.frame, ui::Rect{8, (int16_t)(y + 2), 110, ROW_H - 6}, prev);
+    const ui::Rect rPrev{8, (int16_t)(y + 2), 110, ROW_H - 6};
+    ui::button(c.frame, rPrev, prev);
+    if (prev.enabled) extendDown(rPrev, A_PAGE, prev.value);
 
     ui::ButtonProps nextB = prev;
     nextB.label = "Next >";
     nextB.value = (int16_t)(page_ + 1);
     nextB.enabled = page_ + 1 < pageCount;
-    ui::button(c.frame, ui::Rect{W - 118, (int16_t)(y + 2), 110, ROW_H - 6}, nextB);
+    const ui::Rect rNext{W - 118, (int16_t)(y + 2), 110, ROW_H - 6};
+    ui::button(c.frame, rNext, nextB);
+    if (nextB.enabled) extendDown(rNext, A_PAGE, nextB.value);
 
     const String pos = "Page " + String(page_ + 1) + " of " + String(pageCount);
     ui::drawText(t, ui::Rect{126, y, W - 252, ROW_H}, pos.c_str(),
@@ -516,15 +535,18 @@ void SettingsScreen::drawTzPicker(SettingsCanvas& c) {
   prev.value = (int16_t)-visible;
   prev.text = txt(FONT_SMALL_B, ui::Color::Black, ui::TextAlign::Center);
   prev.styles = ghostButton();
-  prev.minTouchSize = 44;  // bottom-edge target (see the Filter pager note)
+  prev.minTouchSize = 0;
   prev.enabled = tzTop_ > 0;
   ui::button(c.frame, ui::Rect{8, H - 32, 120, 28}, prev);
+  // Bottom-edge: extend the hit zones to the bezel (downward only).
+  if (prev.enabled) c.frame.hit(ui::Rect{8, H - 4, 120, 4}, A_TZ_PG, prev.value);
 
   ui::ButtonProps next = prev;
   next.label = "Next";
   next.value = (int16_t)visible;
   next.enabled = tzTop_ + visible < TIMEZONE_COUNT;
   ui::button(c.frame, ui::Rect{W - 128, H - 32, 120, 28}, next);
+  if (next.enabled) c.frame.hit(ui::Rect{W - 128, H - 4, 120, 4}, A_TZ_PG, next.value);
 
   const uint16_t lastShown =
       tzTop_ + visible < TIMEZONE_COUNT ? (uint16_t)(tzTop_ + visible) : (uint16_t)TIMEZONE_COUNT;
