@@ -335,6 +335,8 @@ void SettingsScreen::drawNormal(SettingsCanvas& c) {
   closeBtn.text = txt(FONT_SMALL_B, ui::Color::White, ui::TextAlign::Center);
   closeBtn.styles = onHeaderButton();
   closeBtn.minTouchSize = 0;
+  // Edge reach is SDK-handled now: ensureMinTouchRect snaps near-edge hit
+  // rects to the screen boundary, so the corner taps land on this button.
   ui::button(c.frame, ui::Rect{W - 70, 3, 64, 24}, closeBtn);
 
   // Tab bar.

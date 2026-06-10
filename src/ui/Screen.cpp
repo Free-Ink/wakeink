@@ -217,7 +217,8 @@ void Screen::drawIdle(const std::vector<Event>& events, const SyncStatus& sync, 
   }
 
   // Settings cog (FreeInkUI button with an icon; white background so the
-  // default button box doesn't draw a frame around it).
+  // default button box doesn't draw a frame around it). Edge/corner reach is
+  // SDK-handled: ensureMinTouchRect snaps near-edge hit rects to the bezel.
   {
     ui::ButtonProps cog;
     cog.icon = ui::BitmapRef{CogIconBits, CogIconW, CogIconH, ui::BitmapFormat::BW1, true};

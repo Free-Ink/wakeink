@@ -84,6 +84,9 @@ void CalendarManager::runSync() {
   int okCount = 0;
   int total = 0;
   String firstError;
+  // Per-calendar outcome, so one calendar's transient failure can't wipe its
+  // previously synced events while another calendar succeeds.
+  bool calOk[CalendarStore::MAX_CALENDARS] = {};
 
   for (size_t i = 0; i < sources.size(); ++i) {
     if (!sources[i].enabled || sources[i].url.isEmpty()) continue;
@@ -121,6 +124,7 @@ void CalendarManager::runSync() {
     }
     parser.finish();
     ++okCount;
+    if (i < CalendarStore::MAX_CALENDARS) calOk[i] = true;
 
     // Filter immediately per calendar: rejected events (and every survivor's
     // description, which only exists for keyword/link matching) are freed
@@ -138,6 +142,20 @@ void CalendarManager::runSync() {
     xSemaphoreGive(mutex_);
   }
 
+  // Carry over the last-good events of any calendar that failed THIS round
+  // (still enabled, just unreachable), so a transient ICS/DNS/TLS blip never
+  // blanks that calendar. Ended events are aged out; disabled/removed
+  // calendars drop naturally because they're neither fetched nor carried.
+  xSemaphoreTake(mutex_, portMAX_DELAY);
+  for (const Event& old : events_) {
+    const uint8_t ci = old.calIndex;
+    const bool wasAttempted = ci < sources.size() && sources[ci].enabled &&
+                              !sources[ci].url.isEmpty();
+    const bool failed = ci < CalendarStore::MAX_CALENDARS && !calOk[ci];
+    if (wasAttempted && failed && old.end > now) filtered.push_back(old);
+  }
+  xSemaphoreGive(mutex_);
+
   std::sort(filtered.begin(), filtered.end(),
             [](const Event& a, const Event& b) { return a.start < b.start; });
   if (filtered.size() > MAX_DISPLAY_EVENTS) filtered.resize(MAX_DISPLAY_EVENTS);
@@ -145,11 +163,7 @@ void CalendarManager::runSync() {
 
   xSemaphoreTake(mutex_, portMAX_DELAY);
   stateStore().pruneSkips(now);
-  // Only replace data if at least one calendar succeeded (or none configured);
-  // a transient outage shouldn't blank the display.
-  if (okCount > 0 || total == 0) {
-    events_ = std::move(filtered);
-  }
+  events_ = std::move(filtered);
   status_.lastSyncTime = time(nullptr);
   status_.lastSyncOk = (okCount == total);
   status_.lastError = firstError;
