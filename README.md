@@ -63,7 +63,14 @@ project compiles as-is — no sibling checkout needed. Requires
   default sound; upload your own from **Settings → Alarms** (16-bit PCM WAV,
   mono/stereo, 8–48 kHz, ≤4 MB).
 - **Day-aware display**: shows the next event, or "No more events today" with
-  tomorrow's first event labeled.
+  tomorrow's first event labeled. Tap an event for a skip dialog.
+- **On-device settings** (cog at bottom-right): tabbed groups — Alarm (lead
+  times, early-meeting alert, auto-stop, test alarm), Sound (alarm sound,
+  volume, ring flash, steady frontlight), Filter (maybe/unaccepted/link rules,
+  work hours + day chips), Clock (timezone picker, 24-hour, look-ahead, poll
+  interval), System (pause alarms, sync now, reboot, network/sync/version
+  info). Everything keyboard-free is adjustable on the panel; free-text
+  settings (keywords, calendars, WiFi) stay on the web dashboard.
 - **ICS engine**: streaming parser with line unfolding, **gzip transfer**
   (an 8.7 MB feed downloads as ~1.4 MB and inflates on-device), full RRULE
   expansion (DAILY/WEEKLY/MONTHLY/YEARLY, INTERVAL, COUNT, UNTIL, BYDAY incl.
@@ -89,6 +96,7 @@ I/O never blocks the UI.
 | WiFi | `src/net/WifiService.*` | saved-network cycling, AP setup portal, SNTP + mDNS |
 | Web UI | `src/web/WebUi.*` + `src/web/html/Index.html` | `WebServer`, JSON APIs, gzipped assets |
 | Display | `src/ui/Screen.*` | screens built from FreeInkUI components (statusBar/header/drawText) |
+| Settings UI | `src/ui/SettingsScreen.*` | tabbed on-device settings (FreeInkUI buttons/list/optionDialog) |
 | UI bridge | `src/ui/GfxTextDrawTarget.*` | implements FreeInkUI's `DrawTarget` over `lib/GfxText` (Noto Sans glyph tables) |
 | Config / state | `src/config/*` | JSON files on LittleFS |
 | Audio glue | `src/audio/AlarmSound.*` | default + uploaded WAV, drives SDK `AudioManager` |

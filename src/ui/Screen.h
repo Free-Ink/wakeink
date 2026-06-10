@@ -25,6 +25,7 @@ class Screen {
   static constexpr int TAP_EVENT = 1;
   static constexpr int TAP_SKIP = 2;
   static constexpr int TAP_CANCEL = 3;
+  static constexpr int TAP_SETTINGS = 4;  // the idle screen's cog button
   struct Tap {
     int action = TAP_NONE;
     int value = 0;

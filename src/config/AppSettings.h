@@ -32,6 +32,7 @@ struct AppSettings {
   bool alarmSoundEnabled = true;        // loop the alarm WAV while ringing
   int alarmVolume = 70;                 // codec output volume, 0-100
   int alarmMaxMinutes = 5;              // auto-stop a ringing alarm after this
+  int frontlightBrightness = 0;         // steady frontlight level outside alarms, 0-100
 
   // --- filtering -------------------------------------------------------------
   std::vector<String> ignoreKeywords;        // flutter.ignore_keywords

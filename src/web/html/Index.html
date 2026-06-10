@@ -163,6 +163,12 @@
         <span id="volLabel" class="evmeta"></span>
       </span></div>
     <div class="row"><label>Auto-stop ringing after (minutes)</label><input type="number" id="alarm_max_minutes" min="1" max="30"></div>
+    <div class="row"><label>Frontlight brightness</label>
+      <span style="display:flex;align-items:center;gap:8px;flex:1;max-width:280px">
+        <input type="range" id="frontlight_brightness" min="0" max="100" step="10" style="flex:1"
+               oninput="document.getElementById('flLabel').textContent=this.value+'%'">
+        <span id="flLabel" class="evmeta"></span>
+      </span></div>
     <div class="row" style="display:block"><label>Alarm sound</label>
       <div class="hint" id="soundStatus">-</div>
       <div class="section-actions">
@@ -469,6 +475,7 @@ function saveCalendars() {
 const SIMPLE_FIELDS = ["use_24_hour_time","poll_interval_minutes","lookahead_days",
   "alarm_lead_time_minutes","early_meeting_alert_enabled","early_meeting_lead_time_minutes",
   "alarm_flash_frontlight","alarm_sound_enabled","alarm_volume","alarm_max_minutes",
+  "frontlight_brightness",
   "show_maybe_events","alarm_on_unaccepted_events",
   "only_alert_with_links","alert_with_any_link","work_hours_enabled"];
 const LIST_FIELDS = ["my_emails","ignore_keywords","always_trigger_keywords","ignore_link_domains"];
@@ -506,6 +513,7 @@ async function loadSettings() {
     else el.value = s[f] ?? "";
   }
   $("volLabel").textContent = (s.alarm_volume ?? 70) + "%";
+  $("flLabel").textContent = (s.frontlight_brightness ?? 0) + "%";
   for (const f of LIST_FIELDS) $(f).value = (s[f] || []).join(", ");
   $("early_before").value = pad(s.early_meeting_before_hour) + ":" + pad(s.early_meeting_before_minute);
   $("work_start").value = pad(s.work_hours_start_hour) + ":" + pad(s.work_hours_start_minute);

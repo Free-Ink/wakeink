@@ -4,6 +4,7 @@
 #include <qrcode.h>
 
 #include "../config/AppSettings.h"
+#include "CogIcon.h"
 #include "GfxTextDrawTarget.h"
 
 namespace ui = freeink::ui;
@@ -197,21 +198,32 @@ void Screen::drawIdle(const std::vector<Event>& events, const SyncStatus& sync, 
   if (!badge.isEmpty()) sb.title = badge.c_str();
   ui::statusBar(c.frame, ui::Rect{0, 0, W, HEADER_H}, sb);
 
-  // --- footer: wakeink.local with the raw IP smaller underneath ---------------
+  // --- footer: wakeink.local + IP, with the settings cog at bottom-right ------
   const int16_t footerY = H - 31;
+  const int16_t footerW = W - 2 * MARGIN - 40;  // keep clear of the cog
   String footerDetail;
   if (wifiUp) {
-    ui::drawText(t, ui::Rect{MARGIN, footerY, W - 2 * MARGIN, lh(t, FONT_SMALL_B)},
+    ui::drawText(t, ui::Rect{MARGIN, footerY, footerW, lh(t, FONT_SMALL_B)},
                  ("http://" + hostname + ".local").c_str(), style(FONT_SMALL_B));
     footerDetail = ip;
     if (sync.lastSyncTime) footerDetail += "  ·  synced " + formatClock(sync.lastSyncTime, use24);
     ui::drawText(t,
-                 ui::Rect{MARGIN, (int16_t)(footerY + lh(t, FONT_SMALL_B) - 1), W - 2 * MARGIN,
+                 ui::Rect{MARGIN, (int16_t)(footerY + lh(t, FONT_SMALL_B) - 1), footerW,
                           lh(t, FONT_TINY)},
                  footerDetail.c_str(), style(FONT_TINY));
   } else {
-    ui::drawText(t, ui::Rect{MARGIN, footerY, W - 2 * MARGIN, lh(t, FONT_SMALL_B)},
+    ui::drawText(t, ui::Rect{MARGIN, footerY, footerW, lh(t, FONT_SMALL_B)},
                  "WiFi disconnected", style(FONT_SMALL_B));
+  }
+
+  // Settings cog (FreeInkUI button with an icon; white background so the
+  // default button box doesn't draw a frame around it).
+  {
+    ui::ButtonProps cog;
+    cog.icon = ui::BitmapRef{CogIconBits, CogIconW, CogIconH, ui::BitmapFormat::BW1, true};
+    cog.action = TAP_SETTINGS;
+    cog.styles.normal.background = ui::Paint::solid(ui::Color::White);
+    ui::button(c.frame, ui::Rect{W - 32, H - 28, 26, 26}, cog);
   }
 
   if (events.empty()) {

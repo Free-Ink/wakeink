@@ -20,6 +20,7 @@
 #include "config/WifiStore.h"
 #include "net/WifiService.h"
 #include "ui/Screen.h"
+#include "ui/SettingsScreen.h"
 #include "web/WebUi.h"
 
 namespace ui = freeink::ui;
@@ -30,9 +31,13 @@ EInkDisplay display(4, 3, 5, 6, 7, 8);  // Murphy M3 pins (BoardConfig::MURPHY_M
 InputManager input;
 FrontlightManager frontlight;
 Screen* screen = nullptr;
+SettingsScreen* settingsScreen = nullptr;
 
-enum class UiState { BOOTING, PORTAL, CONNECTING, IDLE, ALARM, POPUP };
+enum class UiState { BOOTING, PORTAL, CONNECTING, IDLE, ALARM, POPUP, SETTINGS };
 UiState uiState = UiState::BOOTING;
+uint32_t settingsLastInputMs = 0;  // auto-exit settings after idle timeout
+
+constexpr uint32_t SETTINGS_IDLE_EXIT_MS = 120000;  // 2 min untouched -> back to clock
 
 Event ringingEvent;
 Event popupEvent;  // the event whose skip/cancel popup is showing
@@ -66,10 +71,13 @@ void drawIdleScreen(bool full) {
 
 void enterIdle() {
   uiState = UiState::IDLE;
-  frontlight.setBrightness(0);
+  // Restore the user's steady frontlight level (0 = off) after alarms/menus.
+  frontlight.setBrightness((uint8_t)settings().frontlightBrightness);
   fastRefreshCount = 0;
   drawIdleScreen(true);
 }
+
+void startTestAlarm(time_t now);  // defined below startAlarm
 
 void startAlarm(const Event& ev) {
   ringingEvent = ev;
@@ -91,6 +99,15 @@ void stopAlarm(bool fired) {
   alarmsound::stop();
   if (fired) calendarManager().markFired(ringingEvent);
   enterIdle();
+}
+
+void startTestAlarm(time_t now) {
+  Event test;
+  test.uid = "test";
+  test.title = "Test alarm";
+  test.start = now + settings().alarmLeadTimeMinutes * 60;
+  test.end = test.start + 1800;
+  startAlarm(test);
 }
 
 }  // namespace
@@ -152,6 +169,8 @@ void setup() {
   }
 
   screen = new Screen(display);
+  settingsScreen = new SettingsScreen(display, frontlight);
+  frontlight.setBrightness((uint8_t)settings().frontlightBrightness);
   screen->drawMessage("WakeInk", "Starting up...", "v" WAKEINK_VERSION);
   screen->show(true);
 
@@ -242,17 +261,12 @@ void loop() {
         break;
       }
       if (webUi().consumeTestAlarm()) {
-        Event test;
-        test.uid = "test";
-        test.title = "Test alarm";
-        test.start = now + settings().alarmLeadTimeMinutes * 60;
-        test.end = test.start + 1800;
-        startAlarm(test);
+        startTestAlarm(now);
         break;
       }
 
-      // Touch: tap an event to open its skip/cancel popup; tap empty space to
-      // force a sync + redraw.
+      // Touch: tap an event for its skip popup, the cog for settings, or empty
+      // space to force a sync + redraw.
       if (gotTap) {
         const Screen::Tap r = screen->route(snap);
         if (r.action == Screen::TAP_EVENT) {
@@ -263,6 +277,10 @@ void loop() {
             screen->drawEventPopup(popupEvent, now);
             screen->show(true);
           }
+        } else if (r.action == Screen::TAP_SETTINGS) {
+          uiState = UiState::SETTINGS;
+          settingsLastInputMs = ms;
+          settingsScreen->open();
         } else {
           calendarManager().requestSync();
           drawIdleScreen(true);
@@ -282,6 +300,30 @@ void loop() {
       if (tmv.tm_min != lastDrawnMinute && now > 1600000000) {
         ++fastRefreshCount;
         drawIdleScreen(fastRefreshCount % FULL_REFRESH_EVERY == 0);
+      }
+      break;
+    }
+
+    case UiState::SETTINGS: {
+      // An imminent alarm preempts the menu.
+      Event candidate;
+      if (calendarManager().nextAlarm(now, candidate)) {
+        startAlarm(candidate);
+        break;
+      }
+      // Keep info rows (last sync, pause countdown) fresh when a sync lands.
+      if (calendarManager().consumeDirtyFlag()) settingsScreen->redraw();
+
+      if (gotTap || snap.back) {
+        settingsLastInputMs = ms;
+        const SettingsScreen::Result r = settingsScreen->handleInput(snap);
+        if (r == SettingsScreen::Result::CLOSED) {
+          enterIdle();
+        } else if (r == SettingsScreen::Result::TEST_ALARM) {
+          startTestAlarm(now);
+        }
+      } else if (ms - settingsLastInputMs > SETTINGS_IDLE_EXIT_MS) {
+        enterIdle();  // forgotten menu returns to the clock
       }
       break;
     }

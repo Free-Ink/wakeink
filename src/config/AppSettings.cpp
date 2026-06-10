@@ -41,6 +41,7 @@ void AppSettings::toJson(JsonDocument& doc) const {
   doc["alarm_sound_enabled"] = alarmSoundEnabled;
   doc["alarm_volume"] = alarmVolume;
   doc["alarm_max_minutes"] = alarmMaxMinutes;
+  doc["frontlight_brightness"] = frontlightBrightness;
 
   stringsToJson(doc, "ignore_keywords", ignoreKeywords);
   stringsToJson(doc, "always_trigger_keywords", alwaysTriggerKeywords);
@@ -89,6 +90,9 @@ void AppSettings::fromJson(const JsonDocument& doc) {
   if (alarmVolume < 0) alarmVolume = 0;
   if (alarmVolume > 100) alarmVolume = 100;
   alarmMaxMinutes = doc["alarm_max_minutes"] | alarmMaxMinutes;
+  frontlightBrightness = doc["frontlight_brightness"] | frontlightBrightness;
+  if (frontlightBrightness < 0) frontlightBrightness = 0;
+  if (frontlightBrightness > 100) frontlightBrightness = 100;
 
   stringsFromJson(doc, "ignore_keywords", ignoreKeywords);
   stringsFromJson(doc, "always_trigger_keywords", alwaysTriggerKeywords);
