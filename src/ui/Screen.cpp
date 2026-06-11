@@ -10,6 +10,7 @@
 #include "ScreenGeometry.h"
 
 namespace ui = freeink::ui;
+using wakeink::clearColor;
 using wakeink::FONT_BODY;
 using wakeink::FONT_BODY_B;
 using wakeink::FONT_HUGE;
@@ -57,10 +58,6 @@ struct Canvas {
         device(makeDevice()),
         frame(target, device, input, buf) {}
 };
-
-// The screen clear stays app-owned (InvertedDrawTarget contract): paper white
-// in light mode, black in dark mode.
-uint8_t clearColor() { return settings().darkMode ? 0x00 : 0xFF; }
 
 ui::TextStyle style(ui::FontId font, ui::Color color = ui::Color::Black,
                     ui::TextAlign align = ui::TextAlign::Left, uint8_t maxLines = 1) {

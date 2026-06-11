@@ -302,7 +302,7 @@ void SettingsScreen::open() {
 void SettingsScreen::redraw() { draw(EInkDisplay::FAST_REFRESH); }
 
 void SettingsScreen::draw(EInkDisplay::RefreshMode mode) {
-  display_.clearScreen(settings().darkMode ? 0x00 : 0xFF);
+  display_.clearScreen(wakeink::clearColor());
   SettingsCanvas c(display_.getFrameBuffer(), interactions_);
 
   if (modal_ == Modal::TZ_PICKER) {

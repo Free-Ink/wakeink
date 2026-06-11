@@ -9,7 +9,13 @@
 
 #include <BoardConfig.h>
 
+#include "../config/AppSettings.h"
+
 namespace wakeink {
+
+// The screen clear stays app-owned (InvertedDrawTarget contract): paper white
+// in light mode, black in dark mode. Shared here so the screens can't drift.
+inline uint8_t clearColor() { return settings().darkMode ? 0x00 : 0xFF; }
 
 // Alongside the framebuffer size, each device binds its own UI scale: glyph
 // tables (GfxTextDrawTarget::fontFor) and the chrome metrics below. This is
