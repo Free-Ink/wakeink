@@ -17,6 +17,9 @@ struct AppSettings {
   String timezone = "PST8PDT,M3.2.0,M11.1.0";  // POSIX TZ string
   String timezoneName = "America/Los_Angeles"; // display label for the web UI
   int pollIntervalMinutes = 5;          // ICS poll cadence (Android sync = 5 min)
+  bool wifiSleepBetweenSyncs = true;    // nap the radio between polls to save
+                                        // battery; any button press wakes it so
+                                        // the dashboard stays reachable on demand
   int lookaheadDays = 2;                // event query window (default: today + tomorrow)
   bool use24HourTime = false;
   bool darkMode = false;                // invert the on-device UI (white-on-black);

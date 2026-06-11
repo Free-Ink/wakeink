@@ -28,6 +28,11 @@ class WebUi {
   // /api/status can show how long ago the last one ran.
   void notePanelMaintenance() { lastPanelMaintenanceMs_ = millis(); }
 
+  // millis() of the last HTTP request served (0 = never). The WiFi nap logic
+  // keeps the radio up while a dashboard is open (its status poll refreshes
+  // this continuously).
+  uint32_t lastRequestMs() const { return lastRequestMs_; }
+
  private:
   void handleRoot();
   void handleStatus();
@@ -59,6 +64,7 @@ class WebUi {
   volatile bool testAlarmRequested_ = false;
   volatile bool displayRefreshRequested_ = false;
   volatile uint32_t lastPanelMaintenanceMs_ = 0;
+  volatile uint32_t lastRequestMs_ = 0;
 
   // Alarm-sound upload state (multipart streaming to a temp file).
   fs::File uploadFile_;

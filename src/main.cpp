@@ -101,6 +101,24 @@ bool panelMaintenanceDue(uint32_t ms) {
 constexpr bool TOUCH_FLIP_X = false;
 constexpr bool TOUCH_FLIP_Y = false;
 
+// --- WiFi nap (settings().wifiSleepBetweenSyncs) -----------------------------
+// The radio spends most of its life off: after a sync attempt completes the
+// radio suspends, and it resumes one poll interval later for the next sync.
+// Serviced from IDLE only — alarms don't need the network, hibernate has its
+// own suspend, and the setup portal must stay up. Reachability while napping:
+// any key press wakes the radio for a few minutes, and an open dashboard keeps
+// it up (the page's status poll refreshes webUi().lastRequestMs()).
+bool wifiNapping = false;
+uint32_t wifiNapWakeAtMs = 0;      // napping: when to resume
+uint32_t wifiAwakeSinceMs = 0;     // awake: last resume (or boot)
+uint32_t wifiUserWakeUntilMs = 0;  // key-press wake holds the radio up
+bool wifiSawSync = false;          // a sync ran since the last resume
+uint32_t wifiSyncEndedMs = 0;      // ...and finished here (0 = not yet)
+constexpr uint32_t WIFI_NAP_AWAKE_LIMIT_MS = 180000;  // connect+SNTP+sync budget
+constexpr uint32_t WIFI_NAP_POST_SYNC_MS = 30000;     // linger after a sync ends
+constexpr uint32_t WIFI_NAP_WEB_GRACE_MS = 120000;    // dashboard poll keep-alive
+constexpr uint32_t WIFI_NAP_USER_WAKE_MS = 300000;    // key-press wake window
+
 // "#rrggbb" (validated by AppSettings) -> LedColor.
 LedColor ledColorFromHex(const String& hex) {
   const long v = strtol(hex.c_str() + 1, nullptr, 16);
@@ -112,7 +130,7 @@ void drawIdleScreen(bool full) {
   const time_t now = time(nullptr);
   screen->drawIdle(calendarManager().snapshot(), calendarManager().status(),
                    wifiService().currentSsid(), wifiService().ip(), settings().hostname,
-                   wifiService().mode() == WifiService::CONNECTED,
+                   wifiService().mode() == WifiService::CONNECTED || wifiNapping,
                    stateStore().isPaused(now), now);
   screen->show(full);
   struct tm tmv;
@@ -145,14 +163,69 @@ void drawHibernateScreen(bool full) {
 void enterHibernate() {
   uiState = UiState::HIBERNATING;
   wifiService().suspend();
+  // With the radio already off, the CPU clock is the next biggest draw: 80 MHz
+  // roughly halves active current vs 240. APB stays at 80 MHz so SPI/UART/USB
+  // timing is unaffected, and the LED bit-bang recomputes its cycle counts per
+  // frame. Restored before the radio resumes (WiFi needs >= 80; sync wants 240).
+  setCpuFrequencyMhz(80);
   frontlight.setBrightness(0);
   fastRefreshCount = 0;
   drawHibernateScreen(true);
 }
 
-void wakeFromHibernate() {
-  wifiService().resume();  // restarts the connect flow (or the setup portal)
+// Bring the radio back and line up a sync; resets the nap bookkeeping so the
+// awake-time budget starts fresh.
+void wifiNapResume(uint32_t ms) {
+  wifiService().resume();
   calendarManager().requestSync();
+  wifiNapping = false;
+  wifiAwakeSinceMs = ms;
+  wifiSawSync = false;
+  wifiSyncEndedMs = 0;
+}
+
+void serviceWifiNap(uint32_t ms) {
+  if (!settings().wifiSleepBetweenSyncs) {
+    if (wifiNapping) wifiNapResume(ms);
+    return;
+  }
+  if (wifiNapping) {
+    if ((int32_t)(ms - wifiNapWakeAtMs) >= 0) wifiNapResume(ms);
+    return;
+  }
+  if (wifiService().mode() == WifiService::AP_PORTAL) return;  // setup flow stays up
+
+  // Stay up while anything needs the network.
+  if (calendarManager().status().syncing) {
+    wifiSawSync = true;
+    wifiSyncEndedMs = 0;
+    return;
+  }
+  if (wifiSawSync && wifiSyncEndedMs == 0) wifiSyncEndedMs = ms;
+  if (ms < wifiUserWakeUntilMs) return;
+  const uint32_t lastWeb = webUi().lastRequestMs();
+  if (lastWeb && ms - lastWeb < WIFI_NAP_WEB_GRACE_MS) return;
+
+  // Nap once the post-sync linger passes — or once the awake budget runs out
+  // without a sync (no credentials, AP gone, SNTP never landed): retrying on
+  // the poll cadence beats holding the radio up against a dead network.
+  const bool syncDone =
+      wifiSawSync && wifiSyncEndedMs != 0 && ms - wifiSyncEndedMs >= WIFI_NAP_POST_SYNC_MS;
+  if (!syncDone && ms - wifiAwakeSinceMs < WIFI_NAP_AWAKE_LIMIT_MS) return;
+  wifiService().suspend();
+  wifiNapping = true;
+  wifiNapWakeAtMs = ms + (uint32_t)settings().pollIntervalMinutes * 60000UL;
+}
+
+void wakeFromHibernate() {
+  setCpuFrequencyMhz(240);  // full clock back before the radio comes up
+  wifiService().resume();   // restarts the connect flow (or the setup portal)
+  calendarManager().requestSync();
+  // Hibernate wake counts as a fresh radio resume for the nap logic.
+  wifiNapping = false;
+  wifiAwakeSinceMs = millis();
+  wifiSawSync = false;
+  wifiSyncEndedMs = 0;
   // resume() lands in CONNECTING (or AP_PORTAL with no saved networks); the
   // normal modeChanged() handling takes over from idle once it resolves.
   if (wifiService().mode() == WifiService::AP_PORTAL) {
@@ -356,7 +429,10 @@ void loop() {
       case WifiService::CONNECTED:
         if (uiState != UiState::ALARM) {
           calendarManager().requestSync();
-          enterIdle();
+          // Already-idle reconnects (every nap resume lands here) skip the
+          // full redraw — sync results repaint via the dirty flag, so a
+          // poll-interval radio wake doesn't flash the panel.
+          if (uiState != UiState::IDLE) enterIdle();
         }
         break;
       default:
@@ -388,6 +464,14 @@ void loop() {
     }
 
     case UiState::IDLE: {
+      // Radio duty-cycle. A key press or tap while napping wakes the radio for
+      // a few minutes so the dashboard can be reached on demand.
+      if (wifiNapping && (gotTap || anyKeyReleased)) {
+        wifiUserWakeUntilMs = ms + WIFI_NAP_USER_WAKE_MS;
+        wifiNapResume(ms);
+      }
+      serviceWifiNap(ms);
+
       // Swallow a dismiss clicked while nothing was ringing so it can't
       // insta-dismiss the next alarm.
       webUi().consumeDismiss();

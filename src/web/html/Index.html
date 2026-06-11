@@ -150,6 +150,10 @@
     <div class="hint">Comma separated; any match counts as you. Used to find your
       accept/decline/maybe status in invites. Leave blank to treat every event as accepted.</div>
     <div class="row"><label>Poll interval (minutes)</label><input type="number" id="poll_interval_minutes" min="1" max="120"></div>
+    <div class="row"><label>WiFi sleep between syncs</label><input type="checkbox" id="wifi_sleep_between_syncs"></div>
+    <div class="hint">Saves battery by turning the radio off between calendar polls. This dashboard
+      is unreachable while the radio sleeps — press any button on the device to wake WiFi for a
+      few minutes.</div>
     <div class="row"><label>Look-ahead window (days)</label><input type="number" id="lookahead_days" min="1" max="31"></div>
   </div>
 
@@ -506,7 +510,8 @@ function saveCalendars() {
 }
 
 // ---------- settings ----------
-const SIMPLE_FIELDS = ["hostname","use_24_hour_time","poll_interval_minutes","lookahead_days",
+const SIMPLE_FIELDS = ["hostname","use_24_hour_time","poll_interval_minutes",
+  "wifi_sleep_between_syncs","lookahead_days",
   "alarm_lead_time_minutes","early_meeting_alert_enabled","early_meeting_lead_time_minutes",
   "alarm_flash_frontlight","alarm_sound_enabled","alarm_volume","alarm_max_minutes",
   "frontlight_brightness","alarm_led_color_a","alarm_led_color_b","alarm_led_brightness",

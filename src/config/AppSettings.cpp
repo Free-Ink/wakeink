@@ -46,6 +46,7 @@ void AppSettings::toJson(JsonDocument& doc) const {
   doc["timezone"] = timezone;
   doc["timezone_name"] = timezoneName;
   doc["poll_interval_minutes"] = pollIntervalMinutes;
+  doc["wifi_sleep_between_syncs"] = wifiSleepBetweenSyncs;
   doc["lookahead_days"] = lookaheadDays;
   doc["use_24_hour_time"] = use24HourTime;
   doc["dark_mode"] = darkMode;
@@ -108,6 +109,7 @@ void AppSettings::fromJson(const JsonDocument& doc) {
   timezoneName = doc["timezone_name"] | timezoneName;
   pollIntervalMinutes = doc["poll_interval_minutes"] | pollIntervalMinutes;
   if (pollIntervalMinutes < 1) pollIntervalMinutes = 1;
+  wifiSleepBetweenSyncs = doc["wifi_sleep_between_syncs"] | wifiSleepBetweenSyncs;
   lookaheadDays = doc["lookahead_days"] | lookaheadDays;
   if (lookaheadDays < 1) lookaheadDays = 1;
   if (lookaheadDays > 31) lookaheadDays = 31;

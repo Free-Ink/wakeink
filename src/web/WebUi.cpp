@@ -56,6 +56,7 @@ void WebUi::loop() {
 }
 
 void WebUi::handleRoot() {
+  lastRequestMs_ = millis();
   server_->sendHeader("Content-Encoding", "gzip");
   server_->send_P(200, "text/html", IndexHtml, IndexHtmlCompressedSize);
 }
@@ -71,6 +72,7 @@ void WebUi::handleNotFound() {
 }
 
 void WebUi::sendJson(const JsonDocument& doc) {
+  lastRequestMs_ = millis();  // every JSON endpoint counts as dashboard activity
   String out;
   serializeJson(doc, out);
   server_->send(200, "application/json", out);
