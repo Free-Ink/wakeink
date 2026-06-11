@@ -217,9 +217,11 @@ void WebUi::handlePostSettings() {
 
   calendarManager().lockConfig();
   const String oldTz = settings().timezone;
+  const String oldHostname = settings().hostname;
   settings().fromJson(doc);
   const bool ok = settings().save();
   const bool tzChanged = settings().timezone != oldTz;
+  const bool hostnameChanged = settings().hostname != oldHostname;
   calendarManager().unlockConfig();
 
   if (!ok) {
@@ -227,6 +229,7 @@ void WebUi::handlePostSettings() {
     return;
   }
   if (tzChanged) wifiService().applyTimeConfig();
+  if (hostnameChanged) wifiService().applyHostname();  // new .local URL, no reboot needed
   // Tightened filters apply to the display immediately; the sync that follows
   // brings back anything a loosened filter re-admits.
   calendarManager().refilterNow();

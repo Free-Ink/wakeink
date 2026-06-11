@@ -63,6 +63,26 @@ void AppSettings::toJson(JsonDocument& doc) const {
 
 void AppSettings::fromJson(const JsonDocument& doc) {
   hostname = doc["hostname"] | hostname;
+  // Sanitize to a valid mDNS label: lowercase alphanumerics and dashes, no
+  // leading/trailing/double dash, max 32 chars; an empty result falls back to
+  // the default so a device can't rename itself unreachable.
+  {
+    String clean;
+    hostname.toLowerCase();
+    for (size_t i = 0; i < hostname.length() && clean.length() < 32; ++i) {
+      const char ch = hostname[i];
+      if (isalnum((unsigned char)ch)) {
+        clean += ch;
+      } else if ((ch == '-' || ch == ' ' || ch == '_') && !clean.isEmpty() &&
+                 clean[clean.length() - 1] != '-') {
+        clean += '-';
+      }
+    }
+    while (!clean.isEmpty() && clean[clean.length() - 1] == '-') {
+      clean.remove(clean.length() - 1);
+    }
+    hostname = clean.isEmpty() ? String("wakeink") : clean;
+  }
   timezone = doc["timezone"] | timezone;
   timezoneName = doc["timezone_name"] | timezoneName;
   pollIntervalMinutes = doc["poll_interval_minutes"] | pollIntervalMinutes;

@@ -41,7 +41,7 @@ FrontlightManager frontlight;
 Screen* screen = nullptr;
 SettingsScreen* settingsScreen = nullptr;
 
-enum class UiState { BOOTING, PORTAL, CONNECTING, IDLE, ALARM, POPUP, SETTINGS };
+enum class UiState { BOOTING, PORTAL, CONNECTING, IDLE, ALARM, POPUP, SETTINGS, HIBERNATING };
 UiState uiState = UiState::BOOTING;
 uint32_t settingsLastInputMs = 0;  // auto-exit settings after idle timeout
 
@@ -65,6 +65,10 @@ constexpr uint32_t FULL_REFRESH_EVERY = 30;  // minute ticks between deep cleans
 bool darkChordArmed = true;
 uint32_t lastChordMs = 0;
 constexpr uint32_t CHORD_COOLDOWN_MS = 600;
+
+// Idle key actions are suppressed until this time — set when an alarm is
+// dismissed so the dismissing key's release can't double as an idle action.
+uint32_t keyQuietUntilMs = 0;
 
 // Touch→logical mapping is SDK-owned (ui::snapshotFrom + touchToLogical, keyed
 // off the device orientation). These flips compensate only for mirrored panel
@@ -92,6 +96,42 @@ void enterIdle() {
   drawIdleScreen(true);
 }
 
+void drawHibernateScreen(bool full) {
+  const time_t now = time(nullptr);
+  screen->drawHibernate(now);
+  screen->show(full);
+  struct tm tmv;
+  localtime_r(&now, &tmv);
+  lastDrawnMinute = tmv.tm_min;
+}
+
+// Hibernate: WiFi goes off entirely — which inherently stops syncing (the
+// sync task gates on WL_CONNECTED) and alarms stay quiet because nextAlarm is
+// only polled in the active states. The frontlight goes dark and the screen
+// parks on a banner + big clock that keeps ticking. Any key release (or tap)
+// wakes: WiFi reconnects and a sync catches up.
+void enterHibernate() {
+  uiState = UiState::HIBERNATING;
+  wifiService().suspend();
+  frontlight.setBrightness(0);
+  fastRefreshCount = 0;
+  drawHibernateScreen(true);
+}
+
+void wakeFromHibernate() {
+  wifiService().resume();  // restarts the connect flow (or the setup portal)
+  calendarManager().requestSync();
+  // resume() lands in CONNECTING (or AP_PORTAL with no saved networks); the
+  // normal modeChanged() handling takes over from idle once it resolves.
+  if (wifiService().mode() == WifiService::AP_PORTAL) {
+    uiState = UiState::PORTAL;
+    screen->drawSetupPortal(WifiService::AP_SSID, wifiService().ip());
+    screen->show(true);
+    return;
+  }
+  enterIdle();
+}
+
 void startTestAlarm(time_t now);  // defined below startAlarm
 
 void startAlarm(const Event& ev) {
@@ -113,6 +153,9 @@ void startAlarm(const Event& ev) {
 void stopAlarm(bool fired) {
   alarmsound::stop();
   if (fired) calendarManager().markFired(ringingEvent);
+  // The dismissing key's release lands after we're back in IDLE — keep it
+  // from triggering the idle key actions (notably hibernate on Murphy's UP).
+  keyQuietUntilMs = millis() + 600;
   enterIdle();
 }
 
@@ -233,9 +276,16 @@ void loop() {
   const bool gotTap = snap.touchReleased;
   // Any input dismisses an alarm (touch tap or a physical key).
   const bool anyInput = gotTap || input.wasAnyPressed();
+  // Release edges drive the idle/hibernate key actions: a synthesized CONFIRM
+  // (M5's shared key) arrives as press+release in one update, and acting on
+  // release keeps chords and wake presses from double-firing.
+  const bool anyKeyReleased =
+      input.wasReleased(InputManager::BTN_UP) || input.wasReleased(InputManager::BTN_DOWN) ||
+      input.wasReleased(InputManager::BTN_CONFIRM) || input.wasReleased(InputManager::BTN_BACK);
 
-  // WiFi state transitions drive the boot screens.
-  if (wifiService().modeChanged()) {
+  // WiFi state transitions drive the boot screens. While hibernating they are
+  // ignored entirely (the device is asleep); wakeFromHibernate() catches up.
+  if (wifiService().modeChanged() && uiState != UiState::HIBERNATING) {
     switch (wifiService().mode()) {
       case WifiService::AP_PORTAL: {
         uiState = UiState::PORTAL;
@@ -293,12 +343,21 @@ void loop() {
         break;
       }
 
+      // Touch boards (Murphy): the top side key (GPIO1 / BTN_UP) hibernates;
+      // everything else is touch-driven.
+      if (BoardConfig::hasTouch() && input.wasReleased(InputManager::BTN_UP) &&
+          ms >= keyQuietUntilMs) {
+        enterHibernate();
+        break;
+      }
+
       // No touch on this board: settings/skip live on the web dashboard, so
       // the physical keys drive everything. Holding up+down together toggles
-      // dark mode; on a single key release, confirm (GPIO1 on the PaperColor)
-      // forces a complete-waveform deep clean (~15 s on the M5 — clears
-      // accumulated ghosting) and any other key forces a sync + redraw (the
-      // same as tapping empty space below). Single-key actions fire on
+      // dark mode. On a single key release: a short confirm press (GPIO1 on
+      // the PaperColor) hibernates, a press-and-hold of the same key (the
+      // synthesized BACK) forces a complete-waveform deep clean (~15 s on the
+      // M5 — clears accumulated ghosting), and up/down force a sync + redraw
+      // (the same as tapping empty space below). Single-key actions fire on
       // RELEASE, after a chord cooldown, so a forming or ending chord can't
       // trigger them.
       if (!BoardConfig::hasTouch()) {
@@ -314,12 +373,14 @@ void loop() {
         }
         darkChordArmed = true;
 
-        const bool anyKeyReleased = input.wasReleased(InputManager::BTN_UP) ||
-                                    input.wasReleased(InputManager::BTN_DOWN) ||
-                                    input.wasReleased(InputManager::BTN_CONFIRM) ||
-                                    input.wasReleased(InputManager::BTN_BACK);
-        if (anyKeyReleased && ms - lastChordMs > CHORD_COOLDOWN_MS) {
-          if (snap.confirm) display.requestCompleteWaveformNextRefresh();
+        if (anyKeyReleased && ms - lastChordMs > CHORD_COOLDOWN_MS && ms >= keyQuietUntilMs) {
+          if (snap.confirm) {
+            enterHibernate();
+            break;
+          }
+          if (input.wasReleased(InputManager::BTN_BACK)) {
+            display.requestCompleteWaveformNextRefresh();
+          }
           calendarManager().requestSync();
           drawIdleScreen(true);
           break;
@@ -408,6 +469,26 @@ void loop() {
         }
         // SKIP, CANCEL, or a tap outside the buttons all close the popup.
         enterIdle();
+      }
+      break;
+    }
+
+    case UiState::HIBERNATING: {
+      // Asleep: WiFi is off, so no syncing and no alarms — but the big clock
+      // keeps ticking. Drain web triggers latched before suspend so they
+      // can't fire on wake; any key release (or tap) wakes.
+      webUi().consumeTestAlarm();
+      webUi().consumeDismiss();
+      webUi().consumeDisplayRefresh();
+      if (gotTap || anyKeyReleased) {
+        wakeFromHibernate();
+        break;
+      }
+      struct tm tmv;
+      localtime_r(&now, &tmv);
+      if (tmv.tm_min != lastDrawnMinute && now > 1600000000) {
+        ++fastRefreshCount;
+        drawHibernateScreen(fastRefreshCount % FULL_REFRESH_EVERY == 0);
       }
       break;
     }

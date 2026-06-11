@@ -445,6 +445,31 @@ void Screen::drawSetupPortal(const String& apSsid, const String& ip, const Strin
   if (!failNote.isEmpty()) row(FONT_SMALL_B, failNote);
 }
 
+void Screen::drawHibernate(time_t now) {
+  display_.clearScreen(clearColor());
+  Canvas c(display_.getFrameBuffer(), interactions_);
+  ui::DrawTarget& t = c.target;
+
+  ui::HeaderProps hp;
+  hp.styles = invertedBanner();
+  hp.centered = true;
+  hp.title = "WakeInk is hibernating...";
+  hp.titleText = style(FONT_BODY_B, ui::Color::White, ui::TextAlign::Center);
+  ui::header(c.frame, ui::Rect{0, 0, W, BANNER_H}, hp);
+
+  // Big clock (with the date beneath) centered in the space below the banner.
+  const String clock = formatClock(now, settings().use24HourTime);
+  const String date = formatDate(now);
+  const int16_t clockH = lh(t, FONT_HUGE);
+  const int16_t dateH = lh(t, FONT_SMALL);
+  int16_t y = (int16_t)(BANNER_H + (H - BANNER_H - clockH - dateH - 6) / 2);
+  ui::drawText(t, ui::Rect{0, y, W, clockH}, clock.c_str(),
+               style(FONT_HUGE, ui::Color::Black, ui::TextAlign::Center));
+  y += clockH + 6;
+  ui::drawText(t, ui::Rect{0, y, W, dateH}, date.c_str(),
+               style(FONT_SMALL, ui::Color::Black, ui::TextAlign::Center));
+}
+
 void Screen::drawMessage(const char* title, const char* line1, const char* line2) {
   display_.clearScreen(clearColor());
   Canvas c(display_.getFrameBuffer(), interactions_);

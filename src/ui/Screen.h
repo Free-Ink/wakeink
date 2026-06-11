@@ -38,6 +38,7 @@ class Screen {
   void drawEventPopup(const Event& ev, time_t now);
   void drawSetupPortal(const String& apSsid, const String& ip, const String& failNote = String());
   void drawMessage(const char* title, const char* line1, const char* line2 = nullptr);
+  void drawHibernate(time_t now);  // "hibernating" banner + big live clock
 
   // Route an input snapshot (touch tap and/or physical buttons, already mapped
   // to logical coordinates by ui::snapshotFrom) against the interactive regions

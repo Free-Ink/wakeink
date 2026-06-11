@@ -127,13 +127,19 @@ selects its device with a `-DFREEINK_DEVICE_*` flag; the UI's compile-time
 geometry lives in `src/ui/ScreenGeometry.h` and is verified against the panel
 driver at boot.
 
-- **M5Stack PaperColor** has no touch or frontlight: any button press dismisses
-  an alarm, a button press on the clock forces a sync, and all configuration
-  happens on the web dashboard (the on-device settings cog is hidden). Alarm
-  sound plays through the built-in 1W speaker (ES8311 codec + AW8737A amp,
-  driven by the SDK's AudioManager). Refreshes use the FreeInk SDK's
-  interrupted-waveform driver (~340 ms monochrome instead of the panel's native
-  ~15 s six-color refresh).
+- **M5Stack PaperColor** has no touch or frontlight: all configuration happens
+  on the web dashboard (the on-device settings cog is hidden). Keys on the
+  clock: a short press of the front key (GPIO1) **hibernates** (WiFi off — so no
+  syncing or alarms — with a big ticking clock under a "hibernating" banner;
+  any key wakes and reconnects), press-and-hold runs the panel's
+  complete ~15 s waveform (deep ghosting clean, also run once at boot), the
+  side keys force a sync, and holding both side keys toggles **dark mode**.
+  Any key dismisses a ringing alarm. Alarm sound plays through the built-in 1W
+  speaker (ES8311 codec + AW8737A amp, driven by the SDK's AudioManager).
+  Refreshes use the FreeInk SDK's interrupted-waveform driver (~340 ms
+  monochrome instead of the panel's native ~15 s six-color refresh).
+- **Murphy M3**: the top side key (GPIO1) hibernates from the clock; touch
+  drives everything else.
 - **PSRAM is intentionally disabled on the Murphy** (plain `esp32-s3-devkitc-1`
   board + `dio_qspi`). The Murphy module has octal PSRAM, but it is not needed —
   transfers are gzipped and parsing is memory-bounded — and the obvious

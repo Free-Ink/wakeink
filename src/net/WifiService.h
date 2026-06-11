@@ -31,6 +31,17 @@ class WifiService {
   // Re-apply TZ + restart SNTP (used after timezone settings change).
   void applyTimeConfig();
 
+  // Re-register mDNS under the current settings().hostname (used after a
+  // rename from the web UI, so the new http://<name>.local works without a
+  // reboot). No-op unless connected.
+  void applyHostname();
+
+  // Hibernate: tear WiFi down entirely (radio off, AP/mDNS/DNS stopped) —
+  // which inherently stops syncing, since the sync task gates on
+  // WL_CONNECTED. resume() re-runs the normal connect flow from the top.
+  void suspend();
+  void resume() { begin(); }
+
   // Why the last STA attempt failed (empty if none) — shown on the setup
   // screen and in the web UI so a bad password isn't a silent dead end.
   String lastFailedSsid() const { return lastFailedSsid_; }

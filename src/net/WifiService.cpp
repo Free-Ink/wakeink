@@ -100,6 +100,25 @@ void WifiService::onConnected() {
   }
 }
 
+void WifiService::applyHostname() {
+  if (mode_ != CONNECTED) return;  // mDNS comes up in onConnected()
+  MDNS.end();
+  if (MDNS.begin(settings().hostname.c_str())) {
+    MDNS.addService("http", "tcp", 80);
+  }
+  Serial.printf("[wifi] mDNS renamed to http://%s.local\n", settings().hostname.c_str());
+}
+
+void WifiService::suspend() {
+  dns_.stop();
+  MDNS.end();
+  WiFi.softAPdisconnect(true);
+  WiFi.disconnect(true /* turn radio off */);
+  WiFi.mode(WIFI_OFF);
+  mode_ = IDLE;
+  Serial.println("[wifi] suspended (hibernate)");
+}
+
 void WifiService::applyTimeConfig() {
   setenv("TZ", settings().timezone.c_str(), 1);
   tzset();

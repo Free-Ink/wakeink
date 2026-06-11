@@ -133,6 +133,10 @@
 <section id="tab-settings" hidden>
   <div class="card">
     <h2>General</h2>
+    <div class="row"><label>Device name</label><input type="text" id="hostname" placeholder="wakeink"></div>
+    <div class="hint">Sets this device's address: http://&lt;name&gt;.local. Running more than one
+      WakeInk? Give each a unique name (e.g. "wakeink-bedroom") or they will fight over the same
+      URL. Takes effect as soon as you save.</div>
     <div class="row"><label>Timezone</label>
       <span style="display:flex;gap:6px">
         <select id="tzSelect"></select>
@@ -472,7 +476,7 @@ function saveCalendars() {
 }
 
 // ---------- settings ----------
-const SIMPLE_FIELDS = ["use_24_hour_time","poll_interval_minutes","lookahead_days",
+const SIMPLE_FIELDS = ["hostname","use_24_hour_time","poll_interval_minutes","lookahead_days",
   "alarm_lead_time_minutes","early_meeting_alert_enabled","early_meeting_lead_time_minutes",
   "alarm_flash_frontlight","alarm_sound_enabled","alarm_volume","alarm_max_minutes",
   "frontlight_brightness",
