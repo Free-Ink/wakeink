@@ -139,6 +139,10 @@ void WebUi::handleStatus() {
   doc["pm1_vin_mv"] = batteryStatus.pm1VinMv;
   doc["pm1_vinout_mv"] = batteryStatus.pm1VinOutMv;
   doc["pm1_power_source"] = batteryStatus.pm1PowerSource;
+  // Minutes since the last complete-waveform DC-balance pass (~hourly when
+  // healthy); -1 until the first pass reports in.
+  doc["panel_maintenance_age_min"] =
+      lastPanelMaintenanceMs_ ? (long)((millis() - lastPanelMaintenanceMs_) / 60000UL) : -1;
 
   doc["last_sync"] = (long long)sync.lastSyncTime;
   doc["last_sync_ok"] = sync.lastSyncOk;

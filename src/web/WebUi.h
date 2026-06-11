@@ -24,6 +24,10 @@ class WebUi {
   bool consumeTestAlarm();
   bool consumeDisplayRefresh();
 
+  // Main loop reports each panel DC-balance pass (complete waveform) so
+  // /api/status can show how long ago the last one ran.
+  void notePanelMaintenance() { lastPanelMaintenanceMs_ = millis(); }
+
  private:
   void handleRoot();
   void handleStatus();
@@ -54,6 +58,7 @@ class WebUi {
   volatile bool dismissRequested_ = false;
   volatile bool testAlarmRequested_ = false;
   volatile bool displayRefreshRequested_ = false;
+  volatile uint32_t lastPanelMaintenanceMs_ = 0;
 
   // Alarm-sound upload state (multipart streaming to a temp file).
   fs::File uploadFile_;

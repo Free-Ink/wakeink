@@ -293,6 +293,7 @@ void setup() {
   screen->drawMessage("WakeInk", "Starting up...", "v" WAKEINK_VERSION);
   screen->show(true);
   lastCompleteWaveformMs = millis();  // the boot refresh starts the hourly clock
+  webUi().notePanelMaintenance();
 
   // Boot refreshes (the complete waveform above, the portal screen below) may
   // have re-POR'd the 3V3_L2 LED into garbage — settle it before loop() takes
@@ -440,6 +441,7 @@ void loop() {
           if (input.wasReleased(InputManager::BTN_BACK)) {
             display.requestCompleteWaveformNextRefresh();
             lastCompleteWaveformMs = ms;  // manual clean resets the hourly pass
+            webUi().notePanelMaintenance();
             calendarManager().requestSync();
             drawIdleScreen(true);  // complete waveform (~15 s)
             drawIdleScreen(true);  // uniform interrupted baseline
@@ -498,6 +500,7 @@ void loop() {
             !calendarManager().nextAlarm(now + MAINTENANCE_ALARM_GUARD_S, soon)) {
           display.requestCompleteWaveformNextRefresh();
           lastCompleteWaveformMs = ms;
+          webUi().notePanelMaintenance();
           drawIdleScreen(true);  // complete waveform (~15 s)
           drawIdleScreen(true);  // uniform interrupted baseline
         } else {
@@ -576,6 +579,7 @@ void loop() {
         if (panelMaintenanceDue(ms)) {
           display.requestCompleteWaveformNextRefresh();
           lastCompleteWaveformMs = ms;
+          webUi().notePanelMaintenance();
           drawHibernateScreen(true);  // complete waveform (~15 s)
           drawHibernateScreen(true);  // uniform interrupted baseline
         } else {
