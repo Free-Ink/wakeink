@@ -45,14 +45,22 @@ ui::DeviceContext makeDevice() {
 // pushes the framebuffer. A later routeTap() hit-tests that same buffer, so we
 // never redraw just to handle a touch — important on slow e-ink.
 struct Canvas {
-  wakeink::GfxTextDrawTarget target;
+  wakeink::GfxTextDrawTarget raw;
+  ui::InvertedDrawTarget target;  // whole-UI dark mode; passthrough when off
   ui::DeviceContext device;
   ui::InputSnapshot input;  // empty during draw; routing uses a fresh snapshot
   ui::Frame<Screen::MAX_INTERACTIONS> frame;
 
   Canvas(uint8_t* fb, ui::InteractionBuffer<Screen::MAX_INTERACTIONS>& buf)
-      : target(fb, W, H), device(makeDevice()), frame(target, device, input, buf) {}
+      : raw(fb, W, H),
+        target(raw, settings().darkMode),
+        device(makeDevice()),
+        frame(target, device, input, buf) {}
 };
+
+// The screen clear stays app-owned (InvertedDrawTarget contract): paper white
+// in light mode, black in dark mode.
+uint8_t clearColor() { return settings().darkMode ? 0x00 : 0xFF; }
 
 ui::TextStyle style(ui::FontId font, ui::Color color = ui::Color::Black,
                     ui::TextAlign align = ui::TextAlign::Left, uint8_t maxLines = 1) {
@@ -182,7 +190,7 @@ void Screen::drawIdle(const std::vector<Event>& events, const SyncStatus& sync, 
                       const String& ip, const String& hostname, bool wifiUp, bool paused,
                       time_t now) {
   (void)ssid;
-  display_.clearScreen(0xFF);
+  display_.clearScreen(clearColor());
   Canvas c(display_.getFrameBuffer(), interactions_);
   ui::DrawTarget& t = c.target;
   const bool use24 = settings().use24HourTime;
@@ -326,7 +334,7 @@ void Screen::drawIdle(const std::vector<Event>& events, const SyncStatus& sync, 
 
 void Screen::drawEventPopup(const Event& ev, time_t now) {
   (void)now;
-  display_.clearScreen(0xFF);
+  display_.clearScreen(clearColor());
   Canvas c(display_.getFrameBuffer(), interactions_);
   const bool use24 = settings().use24HourTime;
   const String when = formatClock(ev.start, use24) + " - " + formatClock(ev.end, use24);
@@ -368,7 +376,7 @@ Screen::Tap Screen::route(const ui::InputSnapshot& input) {
 }
 
 void Screen::drawAlarm(const Event& ev, time_t now) {
-  display_.clearScreen(0xFF);
+  display_.clearScreen(clearColor());
   Canvas c(display_.getFrameBuffer(), interactions_);
   ui::DrawTarget& t = c.target;
   const bool use24 = settings().use24HourTime;
@@ -404,7 +412,7 @@ void Screen::drawAlarm(const Event& ev, time_t now) {
 }
 
 void Screen::drawSetupPortal(const String& apSsid, const String& ip, const String& failNote) {
-  display_.clearScreen(0xFF);
+  display_.clearScreen(clearColor());
   Canvas c(display_.getFrameBuffer(), interactions_);
   ui::DrawTarget& t = c.target;
 
@@ -441,7 +449,7 @@ void Screen::drawSetupPortal(const String& apSsid, const String& ip, const Strin
 }
 
 void Screen::drawMessage(const char* title, const char* line1, const char* line2) {
-  display_.clearScreen(0xFF);
+  display_.clearScreen(clearColor());
   Canvas c(display_.getFrameBuffer(), interactions_);
   ui::DrawTarget& t = c.target;
 

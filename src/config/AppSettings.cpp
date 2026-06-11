@@ -30,6 +30,7 @@ void AppSettings::toJson(JsonDocument& doc) const {
   doc["poll_interval_minutes"] = pollIntervalMinutes;
   doc["lookahead_days"] = lookaheadDays;
   doc["use_24_hour_time"] = use24HourTime;
+  doc["dark_mode"] = darkMode;
   stringsToJson(doc, "my_emails", myEmails);
 
   doc["alarm_lead_time_minutes"] = alarmLeadTimeMinutes;
@@ -70,6 +71,7 @@ void AppSettings::fromJson(const JsonDocument& doc) {
   if (lookaheadDays < 1) lookaheadDays = 1;
   if (lookaheadDays > 31) lookaheadDays = 31;
   use24HourTime = doc["use_24_hour_time"] | use24HourTime;
+  darkMode = doc["dark_mode"] | darkMode;
   stringsFromJson(doc, "my_emails", myEmails);
   // Migration: older builds stored a single "my_email" string.
   const String legacyEmail = doc["my_email"] | "";

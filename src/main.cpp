@@ -59,6 +59,13 @@ uint32_t fastRefreshCount = 0;
 constexpr uint32_t FLASH_PERIOD_MS = 600;
 constexpr uint32_t FULL_REFRESH_EVERY = 30;  // minute ticks between deep cleans
 
+// Up+down key chord (buttons-only boards) toggles dark mode, mirroring
+// CrossPoint's PaperColor invert combo: one toggle per chord press, and a
+// cooldown so the chord's own key releases don't fire the single-key actions.
+bool darkChordArmed = true;
+uint32_t lastChordMs = 0;
+constexpr uint32_t CHORD_COOLDOWN_MS = 600;
+
 // Touch→logical mapping is SDK-owned (ui::snapshotFrom + touchToLogical, keyed
 // off the device orientation). These flips compensate only for mirrored panel
 // mounting — if taps land mirrored on the bench, flip the matching constant.
@@ -286,15 +293,37 @@ void loop() {
         break;
       }
 
-      // No touch on this board: settings/skip live on the web dashboard. The
-      // confirm key (GPIO1 on the PaperColor) forces a complete-waveform deep
-      // clean (~15 s on the M5 — clears accumulated ghosting); any other key
-      // forces a sync + redraw (the same as tapping empty space below).
-      if (!BoardConfig::hasTouch() && input.wasAnyPressed()) {
-        if (snap.confirm) display.requestCompleteWaveformNextRefresh();
-        calendarManager().requestSync();
-        drawIdleScreen(true);
-        break;
+      // No touch on this board: settings/skip live on the web dashboard, so
+      // the physical keys drive everything. Holding up+down together toggles
+      // dark mode; on a single key release, confirm (GPIO1 on the PaperColor)
+      // forces a complete-waveform deep clean (~15 s on the M5 — clears
+      // accumulated ghosting) and any other key forces a sync + redraw (the
+      // same as tapping empty space below). Single-key actions fire on
+      // RELEASE, after a chord cooldown, so a forming or ending chord can't
+      // trigger them.
+      if (!BoardConfig::hasTouch()) {
+        if (input.isPressed(InputManager::BTN_UP) && input.isPressed(InputManager::BTN_DOWN)) {
+          lastChordMs = ms;
+          if (darkChordArmed) {
+            darkChordArmed = false;
+            settings().darkMode = !settings().darkMode;
+            settings().save();
+            drawIdleScreen(true);
+          }
+          break;
+        }
+        darkChordArmed = true;
+
+        const bool anyKeyReleased = input.wasReleased(InputManager::BTN_UP) ||
+                                    input.wasReleased(InputManager::BTN_DOWN) ||
+                                    input.wasReleased(InputManager::BTN_CONFIRM) ||
+                                    input.wasReleased(InputManager::BTN_BACK);
+        if (anyKeyReleased && ms - lastChordMs > CHORD_COOLDOWN_MS) {
+          if (snap.confirm) display.requestCompleteWaveformNextRefresh();
+          calendarManager().requestSync();
+          drawIdleScreen(true);
+          break;
+        }
       }
 
       // Touch: tap an event for its skip popup, the cog for settings, or empty

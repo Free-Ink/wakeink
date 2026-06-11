@@ -273,13 +273,15 @@ void stepTimeOfDay(int& hour, int& minute, int dir) {
 // Shared render context (same pattern as Screen's Canvas).
 class SettingsCanvas {
  public:
-  wakeink::GfxTextDrawTarget target;
+  wakeink::GfxTextDrawTarget raw;
+  ui::InvertedDrawTarget target;  // whole-UI dark mode; passthrough when off
   ui::DeviceContext device;
   ui::InputSnapshot input;
   ui::Frame<48> frame;
 
   SettingsCanvas(uint8_t* fb, ui::InteractionBuffer<48>& buf)
-      : target(fb, W, H),
+      : raw(fb, W, H),
+        target(raw, settings().darkMode),
         device{W,
                H,
                ui::Orientation::LandscapeCounterClockwise,
@@ -300,7 +302,7 @@ void SettingsScreen::open() {
 void SettingsScreen::redraw() { draw(EInkDisplay::FAST_REFRESH); }
 
 void SettingsScreen::draw(EInkDisplay::RefreshMode mode) {
-  display_.clearScreen(0xFF);
+  display_.clearScreen(settings().darkMode ? 0x00 : 0xFF);
   SettingsCanvas c(display_.getFrameBuffer(), interactions_);
 
   if (modal_ == Modal::TZ_PICKER) {
@@ -311,22 +313,21 @@ void SettingsScreen::draw(EInkDisplay::RefreshMode mode) {
     if (modal_ == Modal::REBOOT) overlayReboot(c);
   }
 
+  // Guard: rows past the buffer cap would silently become un-tappable.
+  if (interactions_.overflowed()) Serial.println("[ui] settings interaction buffer overflow");
+
   display_.displayBuffer(mode);
 }
 
 void SettingsScreen::drawNormal(SettingsCanvas& c) {
   ui::DrawTarget& t = c.target;
 
-  // Hit bands: the visual buttons are 22px tall in a 28px row with small gaps,
+  // Tap bands: the visual buttons are 22px tall in a 28px row with small gaps,
   // leaving dead pixels above/below/between them that made taps feel random.
-  // Each control also registers a contiguous full-row-height band (extended to
-  // the bezel on the last row), so every pixel near a control routes to it.
-  // Bands within a row use disjoint x-ranges, so nothing steals a neighbor's tap.
-  auto hitBand = [&](int16_t x, int16_t w, int16_t rowY, ui::ActionId a, int16_t v) {
-    const bool bottomRow = rowY + ROW_H >= H - 12;
-    const int16_t hgt = bottomRow ? (int16_t)(H - rowY) : (int16_t)ROW_H;
-    c.frame.hit(ui::Rect{x, rowY, w, hgt}, a, v);
-  };
+  // ButtonProps.hitPadding extends each control's hit rect per edge to a
+  // contiguous, non-overlapping full-row band (the old hand-rolled hitBand
+  // geometry, now declarative — one interaction per control). Bezel reach is
+  // SDK-owned: hit rects within 12px of a screen edge snap to it.
 
   // Header: title + Close (Back button routes here too).
   ui::HeaderProps hp;
@@ -377,7 +378,10 @@ void SettingsScreen::drawNormal(SettingsCanvas& c) {
     const int16_t midY = y;
 
     // Label (no dimmed look on a 1-bit panel; INFO rows use a tiny-font value).
-    ui::drawText(t, ui::Rect{10, midY, 190, ROW_H}, row.label, txt(FONT_SMALL));
+    // ACTION rows skip it — their full-width button carries the label itself.
+    if (row.kind != Kind::ACTION) {
+      ui::drawText(t, ui::Rect{10, midY, 190, ROW_H}, row.label, txt(FONT_SMALL));
+    }
 
     switch (row.kind) {
       case Kind::TOGGLE: {
@@ -390,8 +394,8 @@ void SettingsScreen::drawNormal(SettingsCanvas& c) {
         b.text = txt(FONT_SMALL_B, ui::Color::Black, ui::TextAlign::Center);
         b.styles = ghostButton();
         b.minTouchSize = 0;
+        b.hitPadding = ui::Insets{2, 6, 4, 4};  // full row height, W-74..W-4
         ui::button(c.frame, ui::Rect{W - 70, (int16_t)(y + 2), 60, ROW_H - 6}, b);
-        hitBand(W - 74, 70, y, A_TOGGLE, row.item);
         break;
       }
       case Kind::STEPPER: {
@@ -407,14 +411,15 @@ void SettingsScreen::drawNormal(SettingsCanvas& c) {
         minus.text = txt(FONT_BODY_B, ui::Color::Black, ui::TextAlign::Center);
         minus.styles = ghostButton();
         minus.minTouchSize = 0;
+        // Contiguous bands meeting at the gap midpoint: [-] owns W-118..W-60,
+        // [+] owns W-60 rightward (the bezel snap finishes the right edge).
+        minus.hitPadding = ui::Insets{2, 2, 2, 4};
         ui::button(c.frame, ui::Rect{W - 114, (int16_t)(y + 2), 52, ROW_H - 4}, minus);
         ui::ButtonProps plus = minus;
         plus.label = "+";
         plus.action = A_INC;
+        plus.hitPadding = ui::Insets{2, 2, 2, 2};
         ui::button(c.frame, ui::Rect{W - 58, (int16_t)(y + 2), 52, ROW_H - 4}, plus);
-        // Contiguous bands: [-] owns W-118..W-60, [+] owns W-60..W-2.
-        hitBand(W - 118, 58, y, A_DEC, row.item);
-        hitBand(W - 60, 58, y, A_INC, row.item);
         break;
       }
       case Kind::ACTION: {
@@ -425,11 +430,8 @@ void SettingsScreen::drawNormal(SettingsCanvas& c) {
         b.text = txt(FONT_SMALL_B, ui::Color::Black, ui::TextAlign::Center);
         b.styles = ghostButton();
         b.minTouchSize = 0;
-        // Full-width action button replaces the plain label.
-        t.fill(ui::Rect{8, midY, 200, ROW_H}, ui::Paint::solid(ui::Color::White), 0,
-               ui::CornersAll);  // erase the label drawn above
+        b.hitPadding = ui::Insets{2, 8, 4, 8};  // full row, edge to edge
         ui::button(c.frame, ui::Rect{8, (int16_t)(y + 2), W - 16, ROW_H - 6}, b);
-        hitBand(0, W, y, A_DO, row.item);
         break;
       }
       case Kind::PICKER: {
@@ -455,9 +457,9 @@ void SettingsScreen::drawNormal(SettingsCanvas& c) {
           chip.text = txt(FONT_SMALL_B, ui::Color::Black, ui::TextAlign::Center);
           chip.styles = ghostButton();
           chip.minTouchSize = 0;
+          chip.hitPadding = ui::Insets{2, 1, 4, 1};  // full row height, chips stay disjoint
           const int16_t chipX = (int16_t)(W - 10 - (8 - d) * (chipW + 2));
           ui::button(c.frame, ui::Rect{chipX, (int16_t)(y + 2), chipW, ROW_H - 6}, chip);
-          hitBand((int16_t)(chipX - 1), chipW + 2, y, A_DAY, (int16_t)d);
         }
         break;
       }
@@ -482,16 +484,16 @@ void SettingsScreen::drawNormal(SettingsCanvas& c) {
     prev.text = txt(FONT_SMALL_B, ui::Color::Black, ui::TextAlign::Center);
     prev.styles = ghostButton();
     prev.minTouchSize = 0;
-    prev.enabled = page_ > 0;
+    prev.enabled = page_ > 0;  // disabled buttons register no hit rect
+    prev.hitPadding = ui::Insets{2, 6, 4, 8};  // full row, 0..124
     ui::button(c.frame, ui::Rect{8, (int16_t)(y + 2), 110, ROW_H - 6}, prev);
-    if (prev.enabled) hitBand(0, 124, y, A_PAGE, prev.value);
 
     ui::ButtonProps nextB = prev;
     nextB.label = "Next >";
     nextB.value = (int16_t)(page_ + 1);
     nextB.enabled = page_ + 1 < pageCount;
+    nextB.hitPadding = ui::Insets{2, 8, 4, 6};  // full row, W-124..W
     ui::button(c.frame, ui::Rect{W - 118, (int16_t)(y + 2), 110, ROW_H - 6}, nextB);
-    if (nextB.enabled) hitBand(W - 124, 124, y, A_PAGE, nextB.value);
 
     const String pos = "Page " + String(page_ + 1) + " of " + String(pageCount);
     ui::drawText(t, ui::Rect{126, y, W - 252, ROW_H}, pos.c_str(),
@@ -546,16 +548,15 @@ void SettingsScreen::drawTzPicker(SettingsCanvas& c) {
   prev.styles = ghostButton();
   prev.minTouchSize = 0;
   prev.enabled = tzTop_ > 0;
+  // Bottom-edge reach is SDK-owned: the buttons end 4px from the bezel, inside
+  // the 12px edge-snap threshold, so their hit rects already extend to it.
   ui::button(c.frame, ui::Rect{8, H - 32, 120, 28}, prev);
-  // Bottom-edge: extend the hit zones to the bezel (downward only).
-  if (prev.enabled) c.frame.hit(ui::Rect{8, H - 4, 120, 4}, A_TZ_PG, prev.value);
 
   ui::ButtonProps next = prev;
   next.label = "Next";
   next.value = (int16_t)visible;
   next.enabled = tzTop_ + visible < TIMEZONE_COUNT;
   ui::button(c.frame, ui::Rect{W - 128, H - 32, 120, 28}, next);
-  if (next.enabled) c.frame.hit(ui::Rect{W - 128, H - 4, 120, 4}, A_TZ_PG, next.value);
 
   const uint16_t lastShown =
       tzTop_ + visible < TIMEZONE_COUNT ? (uint16_t)(tzTop_ + visible) : (uint16_t)TIMEZONE_COUNT;

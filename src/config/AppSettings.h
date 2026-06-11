@@ -19,6 +19,9 @@ struct AppSettings {
   int pollIntervalMinutes = 5;          // ICS poll cadence (Android sync = 5 min)
   int lookaheadDays = 2;                // event query window (default: today + tomorrow)
   bool use24HourTime = false;
+  bool darkMode = false;                // invert the on-device UI (white-on-black);
+                                        // toggled by the up+down key chord on
+                                        // buttons-only boards, or via the web API
   std::vector<String> myEmails;         // your accounts, matched against ICS ATTENDEE
                                         // lines to find your PARTSTAT (any-of)
 
