@@ -85,6 +85,7 @@
       <div class="row"><label>Device time</label><span id="stTime" class="pill"></span></div>
       <div class="row"><label>Last sync</label><span id="stSync" class="pill"></span></div>
       <div class="row"><label>Alarms</label><span id="stPause" class="pill"></span></div>
+      <div class="row"><label>Battery</label><span id="stBattery" class="pill"></span></div>
       <div class="row"><label>Free heap</label><span id="stHeap" class="pill"></span></div>
     </div>
     <div class="section-actions">
@@ -393,6 +394,22 @@ async function refreshStatus() {
     $("stHeap").textContent = Math.round(s.heap_free / 1024) + " KB (low-water " +
       Math.round(s.heap_min / 1024) + " KB)" +
       (s.psram_size ? " · PSRAM " + Math.round(s.psram_free / 1048576 * 10) / 10 + " MB free" : "");
+    const battery = $("stBattery");
+    if (!s.battery_supported) {
+      battery.textContent = "not reported";
+      battery.className = "pill";
+    } else {
+      const parts = [];
+      if (s.battery_percent != null) parts.push(s.battery_percent + "%");
+      if (s.battery_mv != null) parts.push((s.battery_mv / 1000).toFixed(2) + " V");
+      if (s.battery_charging === true) parts.push("charging");
+      else if (s.battery_charging === false) parts.push("not charging");
+      else if (s.battery_external_power === true) parts.push("USB power");
+      else if (s.battery_external_power === false) parts.push("on battery");
+      battery.textContent = parts.length ? parts.join(" · ") : "unavailable";
+      const low = s.battery_percent != null && s.battery_percent <= 15 && s.battery_charging !== true;
+      battery.className = "pill " + (low ? "err" : "ok");
+    }
     $("soundStatus").textContent = !s.audio_present ? "No audio hardware detected." :
       (s.custom_alarm_sound ? "Using your uploaded sound." : "Using the built-in default sound.");
   } catch (e) { /* device busy; retry on next tick */ }

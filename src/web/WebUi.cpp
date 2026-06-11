@@ -1,6 +1,7 @@
 #include "WebUi.h"
 
 #include <ArduinoJson.h>
+#include <BatteryMonitor.h>
 #include <WiFi.h>
 
 #include <LittleFS.h>
@@ -109,6 +110,35 @@ void WebUi::handleStatus() {
   doc["heap_min"] = (long)esp_get_minimum_free_heap_size();
   doc["psram_free"] = (long)ESP.getFreePsram();
   doc["psram_size"] = (long)ESP.getPsramSize();
+
+  static BatteryMonitor battery;
+  const BatteryMonitor::Status batteryStatus = battery.readStatus();
+  doc["battery_supported"] = batteryStatus.supported;
+  if (batteryStatus.percentageKnown) {
+    doc["battery_percent"] = batteryStatus.percentage;
+  } else {
+    doc["battery_percent"] = nullptr;
+  }
+  if (batteryStatus.millivoltsKnown) {
+    doc["battery_mv"] = batteryStatus.millivolts;
+  } else {
+    doc["battery_mv"] = nullptr;
+  }
+  if (batteryStatus.chargingKnown) {
+    doc["battery_charging"] = batteryStatus.charging;
+  } else {
+    doc["battery_charging"] = nullptr;
+  }
+  if (batteryStatus.externalPowerKnown) {
+    doc["battery_external_power"] = batteryStatus.externalPower;
+  } else {
+    doc["battery_external_power"] = nullptr;
+  }
+  // Raw PM1 rail telemetry (PaperColor only, -1 when unread) — diagnostics for
+  // external-power detection; visible at /api/status, not rendered in the UI.
+  doc["pm1_vin_mv"] = batteryStatus.pm1VinMv;
+  doc["pm1_vinout_mv"] = batteryStatus.pm1VinOutMv;
+  doc["pm1_power_source"] = batteryStatus.pm1PowerSource;
 
   doc["last_sync"] = (long long)sync.lastSyncTime;
   doc["last_sync_ok"] = sync.lastSyncOk;
