@@ -9,6 +9,24 @@ AppSettings& settings() {
   return instance;
 }
 
+// Validate a "#rrggbb" hex color; anything malformed falls back to `fallback`
+// so a bad web payload can't leave the LEDs unparsable.
+static String sanitizeHexColor(String v, const char* fallback) {
+  v.trim();
+  v.toLowerCase();
+  if (v.length() == 7 && v[0] == '#') {
+    bool ok = true;
+    for (int i = 1; i < 7; ++i) {
+      if (!isxdigit((unsigned char)v[i])) {
+        ok = false;
+        break;
+      }
+    }
+    if (ok) return v;
+  }
+  return String(fallback);
+}
+
 static void stringsToJson(JsonDocument& doc, const char* key, const std::vector<String>& list) {
   JsonArray arr = doc[key].to<JsonArray>();
   for (const auto& s : list) arr.add(s);
@@ -43,6 +61,9 @@ void AppSettings::toJson(JsonDocument& doc) const {
   doc["alarm_volume"] = alarmVolume;
   doc["alarm_max_minutes"] = alarmMaxMinutes;
   doc["frontlight_brightness"] = frontlightBrightness;
+  doc["alarm_led_color_a"] = alarmLedColorA;
+  doc["alarm_led_color_b"] = alarmLedColorB;
+  doc["alarm_led_brightness"] = alarmLedBrightness;
 
   stringsToJson(doc, "ignore_keywords", ignoreKeywords);
   stringsToJson(doc, "always_trigger_keywords", alwaysTriggerKeywords);
@@ -116,6 +137,11 @@ void AppSettings::fromJson(const JsonDocument& doc) {
   frontlightBrightness = doc["frontlight_brightness"] | frontlightBrightness;
   if (frontlightBrightness < 0) frontlightBrightness = 0;
   if (frontlightBrightness > 100) frontlightBrightness = 100;
+  alarmLedColorA = sanitizeHexColor(doc["alarm_led_color_a"] | alarmLedColorA, "#ff0000");
+  alarmLedColorB = sanitizeHexColor(doc["alarm_led_color_b"] | alarmLedColorB, "#0000ff");
+  alarmLedBrightness = doc["alarm_led_brightness"] | alarmLedBrightness;
+  if (alarmLedBrightness < 0) alarmLedBrightness = 0;
+  if (alarmLedBrightness > 100) alarmLedBrightness = 100;
 
   stringsFromJson(doc, "ignore_keywords", ignoreKeywords);
   stringsFromJson(doc, "always_trigger_keywords", alwaysTriggerKeywords);

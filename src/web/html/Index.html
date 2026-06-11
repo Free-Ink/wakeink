@@ -173,6 +173,19 @@
                oninput="document.getElementById('flLabel').textContent=this.value+'%'">
         <span id="flLabel" class="evmeta"></span>
       </span></div>
+    <div class="row"><label>Alarm LED colors</label>
+      <span style="display:flex;align-items:center;gap:8px">
+        <input type="color" id="alarm_led_color_a">
+        <input type="color" id="alarm_led_color_b">
+      </span></div>
+    <div class="row"><label>Alarm LED brightness</label>
+      <span style="display:flex;align-items:center;gap:8px;flex:1;max-width:280px">
+        <input type="range" id="alarm_led_brightness" min="0" max="100" step="5" style="flex:1"
+               oninput="document.getElementById('ledLabel').textContent=this.value+'%'">
+        <span id="ledLabel" class="evmeta"></span>
+      </span></div>
+    <div class="hint">The RGB LEDs (PaperColor) strobe between the two colors while ringing,
+      together with "Flash light on ring".</div>
     <div class="row" style="display:block"><label>Alarm sound</label>
       <div class="hint" id="soundStatus">-</div>
       <div class="section-actions">
@@ -479,7 +492,7 @@ function saveCalendars() {
 const SIMPLE_FIELDS = ["hostname","use_24_hour_time","poll_interval_minutes","lookahead_days",
   "alarm_lead_time_minutes","early_meeting_alert_enabled","early_meeting_lead_time_minutes",
   "alarm_flash_frontlight","alarm_sound_enabled","alarm_volume","alarm_max_minutes",
-  "frontlight_brightness",
+  "frontlight_brightness","alarm_led_color_a","alarm_led_color_b","alarm_led_brightness",
   "show_maybe_events","alarm_on_unaccepted_events",
   "only_alert_with_links","alert_with_any_link","work_hours_enabled"];
 const LIST_FIELDS = ["my_emails","ignore_keywords","always_trigger_keywords","ignore_link_domains"];
@@ -518,6 +531,7 @@ async function loadSettings() {
   }
   $("volLabel").textContent = (s.alarm_volume ?? 70) + "%";
   $("flLabel").textContent = (s.frontlight_brightness ?? 0) + "%";
+  $("ledLabel").textContent = (s.alarm_led_brightness ?? 60) + "%";
   for (const f of LIST_FIELDS) $(f).value = (s[f] || []).join(", ");
   $("early_before").value = pad(s.early_meeting_before_hour) + ":" + pad(s.early_meeting_before_minute);
   $("work_start").value = pad(s.work_hours_start_hour) + ":" + pad(s.work_hours_start_minute);

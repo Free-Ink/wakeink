@@ -15,6 +15,7 @@
 #include <FreeInkUIInputManager.h>  // ui::snapshotFrom (orientation-aware touch)
 #include <FrontlightManager.h>
 #include <InputManager.h>
+#include <LedManager.h>
 #include <LittleFS.h>
 
 #include "audio/AlarmSound.h"
@@ -38,6 +39,7 @@ EInkDisplay display(BoardConfig::ACTIVE.display.sclk, BoardConfig::ACTIVE.displa
                     BoardConfig::ACTIVE.display.rst, BoardConfig::ACTIVE.display.busy);
 InputManager input;
 FrontlightManager frontlight;
+LedManager leds;  // PaperColor's two RGB LEDs; no-op stub on boards without LEDs
 Screen* screen = nullptr;
 SettingsScreen* settingsScreen = nullptr;
 
@@ -70,6 +72,15 @@ constexpr uint32_t CHORD_COOLDOWN_MS = 600;
 // dismissed so the dismissing key's release can't double as an idle action.
 uint32_t keyQuietUntilMs = 0;
 
+// LED watchdog: one of the PaperColor's LEDs rides 3V3_L2 (per the board
+// silkscreen) — the main power layer every panel refresh loads down. A dip
+// re-PORs the LED into latched garbage (a stuck green pixel) at some point
+// AFTER the refresh returns, so per-refresh re-asserts race it and lose.
+// Instead the loop re-pushes the LED buffer twice a second in every UI state;
+// garbage survives at most half a second. No-op on boards without LEDs.
+uint32_t lastLedAssertMs = 0;
+constexpr uint32_t LED_ASSERT_PERIOD_MS = 500;
+
 // Panel DC-balance maintenance (M5 PaperColor): interrupted refreshes cut the
 // OTP waveform short, so each one leaves a little net charge on the pixels —
 // over hours the panel darkens and colors fade. The complete waveform is the
@@ -89,6 +100,13 @@ bool panelMaintenanceDue(uint32_t ms) {
 // mounting — if taps land mirrored on the bench, flip the matching constant.
 constexpr bool TOUCH_FLIP_X = false;
 constexpr bool TOUCH_FLIP_Y = false;
+
+// "#rrggbb" (validated by AppSettings) -> LedColor.
+LedColor ledColorFromHex(const String& hex) {
+  const long v = strtol(hex.c_str() + 1, nullptr, 16);
+  return LedColor::rgb((uint8_t)((v >> 16) & 0xFF), (uint8_t)((v >> 8) & 0xFF),
+                       (uint8_t)(v & 0xFF));
+}
 
 void drawIdleScreen(bool full) {
   const time_t now = time(nullptr);
@@ -162,6 +180,17 @@ void startAlarm(const Event& ev) {
   }
   screen->drawAlarm(ev, time(nullptr));
   screen->show(true);
+  // LEDs go last, AFTER the panel refresh: the refresh's current draw can sag
+  // the PM1 LED rail and re-POR the LEDs, wiping anything written earlier.
+  // One "flash light" setting drives whatever light the board has — the
+  // frontlight strobe on Murphy, the two RGB LEDs (the configured color pair,
+  // swapped between the LEDs each beat) on the PaperColor.
+  if (settings().alarmFlashFrontlight) {
+    leds.setBrightness((uint8_t)(settings().alarmLedBrightness * 255 / 100));
+    leds.setColor(0, ledColorFromHex(settings().alarmLedColorA));
+    leds.setColor(1, ledColorFromHex(settings().alarmLedColorB));
+    leds.show();
+  }
 }
 
 void stopAlarm(bool fired) {
@@ -171,6 +200,10 @@ void stopAlarm(bool fired) {
   // from triggering the idle key actions (notably hibernate on Murphy's UP).
   keyQuietUntilMs = millis() + 600;
   enterIdle();
+  // Clear the LEDs AFTER enterIdle()'s full panel refresh — clearing first
+  // left them vulnerable to a rail-sag re-POR during the refresh, which is
+  // how a stuck (typically green) LED survived dismissal.
+  leds.clear();
 }
 
 void startTestAlarm(time_t now) {
@@ -245,6 +278,7 @@ void setup() {
   }
   input.begin();
   frontlight.begin();
+  leds.begin();
   if (!alarmsound::audio().begin()) {
     Serial.println("[wakeink] audio unavailable (no codec?)");
   }
@@ -259,6 +293,11 @@ void setup() {
   screen->drawMessage("WakeInk", "Starting up...", "v" WAKEINK_VERSION);
   screen->show(true);
   lastCompleteWaveformMs = millis();  // the boot refresh starts the hourly clock
+
+  // Boot refreshes (the complete waveform above, the portal screen below) may
+  // have re-POR'd the 3V3_L2 LED into garbage — settle it before loop() takes
+  // over with the periodic re-assert.
+  leds.clear();
 
   wifiService().begin();
   webUi().begin();
@@ -328,11 +367,16 @@ void loop() {
     case UiState::ALARM: {
       webUi().consumeTestAlarm();  // ignore while already ringing
 
-      // Frontlight strobe while ringing.
+      // Light strobe while ringing: frontlight pulse + LEDs swapping colors.
       if (settings().alarmFlashFrontlight && ms - lastFlashToggleMs >= FLASH_PERIOD_MS) {
         lastFlashToggleMs = ms;
         flashOn = !flashOn;
         frontlight.setBrightness(flashOn ? 100 : 10);
+        const LedColor a = ledColorFromHex(settings().alarmLedColorA);
+        const LedColor b = ledColorFromHex(settings().alarmLedColorB);
+        leds.setColor(0, flashOn ? a : b);
+        leds.setColor(1, flashOn ? b : a);
+        leds.show();
       }
       const bool timedOut = ms - alarmStartedMs > (uint32_t)settings().alarmMaxMinutes * 60000UL;
       const bool eventOver = now > ringingEvent.end;
@@ -550,6 +594,13 @@ void loop() {
 
     case UiState::BOOTING:
       break;
+  }
+
+  // LED watchdog (see lastLedAssertMs): re-push the buffer so a rail-dip
+  // re-POR can't leave an LED latched with garbage for more than ~500 ms.
+  if (ms - lastLedAssertMs >= LED_ASSERT_PERIOD_MS) {
+    lastLedAssertMs = ms;
+    leds.show();
   }
 
   delay(20);

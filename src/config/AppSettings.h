@@ -36,6 +36,9 @@ struct AppSettings {
   int alarmVolume = 70;                 // codec output volume, 0-100
   int alarmMaxMinutes = 5;              // auto-stop a ringing alarm after this
   int frontlightBrightness = 0;         // steady frontlight level outside alarms, 0-100
+  String alarmLedColorA = "#ff0000";    // alarm LED strobe pair ("#rrggbb"), used on
+  String alarmLedColorB = "#0000ff";    // boards with RGB LEDs (M5 PaperColor)
+  int alarmLedBrightness = 60;          // LED strobe brightness, 0-100
 
   // --- filtering -------------------------------------------------------------
   std::vector<String> ignoreKeywords;        // flutter.ignore_keywords
