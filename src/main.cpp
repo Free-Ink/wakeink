@@ -70,6 +70,20 @@ constexpr uint32_t CHORD_COOLDOWN_MS = 600;
 // dismissed so the dismissing key's release can't double as an idle action.
 uint32_t keyQuietUntilMs = 0;
 
+// Panel DC-balance maintenance (M5 PaperColor): interrupted refreshes cut the
+// OTP waveform short, so each one leaves a little net charge on the pixels —
+// over hours the panel darkens and colors fade. The complete waveform is the
+// only DC-balanced cycle; promote one redraw per hour to it (~15 s blackout).
+// requestCompleteWaveformNextRefresh() is a no-op on other panels.
+uint32_t lastCompleteWaveformMs = 0;
+constexpr uint32_t COMPLETE_WAVEFORM_INTERVAL_MS = 60UL * 60UL * 1000UL;
+// Don't start a ~15 s blocking refresh if an alarm would ring during/near it.
+constexpr time_t MAINTENANCE_ALARM_GUARD_S = 180;
+
+bool panelMaintenanceDue(uint32_t ms) {
+  return ms - lastCompleteWaveformMs >= COMPLETE_WAVEFORM_INTERVAL_MS;
+}
+
 // Touch→logical mapping is SDK-owned (ui::snapshotFrom + touchToLogical, keyed
 // off the device orientation). These flips compensate only for mirrored panel
 // mounting — if taps land mirrored on the bench, flip the matching constant.
@@ -244,6 +258,7 @@ void setup() {
   display.requestCompleteWaveformNextRefresh();
   screen->drawMessage("WakeInk", "Starting up...", "v" WAKEINK_VERSION);
   screen->show(true);
+  lastCompleteWaveformMs = millis();  // the boot refresh starts the hourly clock
 
   wifiService().begin();
   webUi().begin();
@@ -380,6 +395,11 @@ void loop() {
           }
           if (input.wasReleased(InputManager::BTN_BACK)) {
             display.requestCompleteWaveformNextRefresh();
+            lastCompleteWaveformMs = ms;  // manual clean resets the hourly pass
+            calendarManager().requestSync();
+            drawIdleScreen(true);  // complete waveform (~15 s)
+            drawIdleScreen(true);  // uniform interrupted baseline
+            break;
           }
           calendarManager().requestSync();
           drawIdleScreen(true);
@@ -421,7 +441,24 @@ void loop() {
       localtime_r(&now, &tmv);
       if (tmv.tm_min != lastDrawnMinute && now > 1600000000) {
         ++fastRefreshCount;
-        drawIdleScreen(fastRefreshCount % FULL_REFRESH_EVERY == 0);
+        const bool full = fastRefreshCount % FULL_REFRESH_EVERY == 0;
+        // Hourly DC-balance pass, skipped when an alarm is about to ring (the
+        // complete waveform blocks the loop for ~15 s). The complete waveform
+        // settles true white but every later partial update is interrupted-
+        // yellow, which reads as a stain — so follow it immediately with a
+        // full interrupted pass to put the whole panel on one uniform
+        // baseline. (The balance benefit comes from the complete cycle having
+        // run, not from its white staying on screen.)
+        Event soon;
+        if (panelMaintenanceDue(ms) &&
+            !calendarManager().nextAlarm(now + MAINTENANCE_ALARM_GUARD_S, soon)) {
+          display.requestCompleteWaveformNextRefresh();
+          lastCompleteWaveformMs = ms;
+          drawIdleScreen(true);  // complete waveform (~15 s)
+          drawIdleScreen(true);  // uniform interrupted baseline
+        } else {
+          drawIdleScreen(full);
+        }
       }
       break;
     }
@@ -488,7 +525,18 @@ void loop() {
       localtime_r(&now, &tmv);
       if (tmv.tm_min != lastDrawnMinute && now > 1600000000) {
         ++fastRefreshCount;
-        drawHibernateScreen(fastRefreshCount % FULL_REFRESH_EVERY == 0);
+        const bool full = fastRefreshCount % FULL_REFRESH_EVERY == 0;
+        // Hourly DC-balance pass (no alarm guard needed — nothing rings
+        // here). Same complete-then-interrupted pair as idle, so the parked
+        // screen stays on one uniform background.
+        if (panelMaintenanceDue(ms)) {
+          display.requestCompleteWaveformNextRefresh();
+          lastCompleteWaveformMs = ms;
+          drawHibernateScreen(true);  // complete waveform (~15 s)
+          drawHibernateScreen(true);  // uniform interrupted baseline
+        } else {
+          drawHibernateScreen(full);
+        }
       }
       break;
     }

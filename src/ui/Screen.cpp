@@ -89,9 +89,19 @@ String countdownLabel(time_t now, const Event& ev) {
   if (now >= ev.start && now < ev.end) return "now";
   long mins = (long)(ev.start - now) / 60;
   if (mins < 1) return "now";
-  if (mins < 60) return "in " + String(mins) + " min";
+  // Far-out countdowns step coarsely (5-minute steps inside the hour, quarter
+  // hours beyond it, floored so the time left is never overstated). The label
+  // then changes only on step boundaries, so most minute ticks dirty nothing
+  // but the status-bar clock — keeping the panel's partial-refresh window
+  // (one bounding rect over every changed pixel) to a few glyphs instead of a
+  // clock-to-countdown stripe. Inside 15 minutes it stays exact.
+  if (mins < 60) {
+    if (mins >= 15) mins -= mins % 5;
+    return "in " + String(mins) + " min";
+  }
   const long hours = mins / 60;
   mins %= 60;
+  mins -= mins % 15;
   if (hours < 24) {
     return mins ? "in " + String(hours) + "h " + String(mins) + "m" : "in " + String(hours) + "h";
   }
