@@ -1,5 +1,19 @@
 #include "GfxTextDrawTarget.h"
 
+#include "ScreenGeometry.h"
+
+// Per-device glyph tables: the same FontId binds a ~1.4x larger table on the
+// denser PaperColor panel — the SDK's intended scaling model (font slots bind
+// different glyph sets per device; fractional glyph scaling would be mush).
+#if FREEINK_DEVICE_M5
+#include <fonts/NotoSans14.h>
+#include <fonts/NotoSans17.h>
+#include <fonts/NotoSans17B.h>
+#include <fonts/NotoSans21.h>
+#include <fonts/NotoSans21B.h>
+#include <fonts/NotoSans30B.h>
+#include <fonts/NotoSans40B.h>
+#else
 #include <fonts/NotoSans10.h>
 #include <fonts/NotoSans12.h>
 #include <fonts/NotoSans12B.h>
@@ -7,6 +21,7 @@
 #include <fonts/NotoSans15B.h>
 #include <fonts/NotoSans21B.h>
 #include <fonts/NotoSans28B.h>
+#endif
 
 namespace wakeink {
 
@@ -20,6 +35,18 @@ using freeink::ui::TextAlign;
 using freeink::ui::TextStyle;
 
 const FontDef* GfxTextDrawTarget::fontFor(freeink::ui::FontId font) {
+#if FREEINK_DEVICE_M5
+  switch (font) {
+    case FONT_TINY: return &NotoSans14;
+    case FONT_SMALL: return &NotoSans17;
+    case FONT_SMALL_B: return &NotoSans17B;
+    case FONT_BODY: return &NotoSans21;
+    case FONT_BODY_B: return &NotoSans21B;
+    case FONT_TITLE: return &NotoSans30B;
+    case FONT_HUGE: return &NotoSans40B;
+    default: return &NotoSans21;
+  }
+#else
   switch (font) {
     case FONT_TINY: return &NotoSans10;
     case FONT_SMALL: return &NotoSans12;
@@ -30,6 +57,7 @@ const FontDef* GfxTextDrawTarget::fontFor(freeink::ui::FontId font) {
     case FONT_HUGE: return &NotoSans28B;
     default: return &NotoSans15;
   }
+#endif
 }
 
 bool GfxTextDrawTarget::isInk(Color c) {

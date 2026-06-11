@@ -1,11 +1,13 @@
 # WakeInk
 
-A calendar-alarm clock for the **Murphy M3** e-ink device. WakeInk subscribes to
-Google Calendar **ICS links** (the "secret address in iCal format") pasted into a
-**web dashboard hosted on the device itself** — no Google account, OAuth, or app
-required. It keeps a persistent WiFi connection, polls the feeds, renders the next
-event widget-style on the 416×240 panel, and rings a full-screen alarm (frontlight
-strobe + looping sound through the headphone jack) before your meetings.
+A calendar-alarm clock for FreeInk e-ink devices — the **Murphy M3** (416×240,
+touch, frontlight, audio) and the **M5Stack PaperColor** (600×400, buttons,
+built-in speaker). WakeInk subscribes to Google Calendar **ICS links** (the
+"secret address in iCal format") pasted into a **web dashboard hosted on the
+device itself** — no Google account, OAuth, or app required. It keeps a
+persistent WiFi connection, polls the feeds, renders the next event widget-style
+on the panel, and rings a full-screen alarm with a looping sound (plus a
+frontlight strobe on the Murphy) before your meetings.
 
 ---
 
@@ -14,8 +16,9 @@ strobe + looping sound through the headphone jack) before your meetings.
 ```bash
 git clone --recurse-submodules https://github.com/<you>/wakeink.git
 cd wakeink
-pio run -e murphy -t upload     # build + flash over USB
-pio device monitor              # serial logs @ 115200
+pio run -e murphy -t upload        # Murphy M3: build + flash over USB
+pio run -e m5papercolor -t upload  # M5Stack PaperColor
+pio device monitor                 # serial logs @ 115200
 ```
 
 Already cloned without `--recurse-submodules`? Run:
@@ -118,12 +121,24 @@ device timezone only for an unknown zone.
 
 ## Build details
 
-`platformio.ini` defines one environment, `murphy` (ESP32-S3, UC8253 panel).
+`platformio.ini` defines one environment per device: `murphy` (ESP32-S3, UC8253
+panel) and `m5papercolor` (ESP32-S3, ED2208 Spectra-6 color panel). Each env
+selects its device with a `-DFREEINK_DEVICE_*` flag; the UI's compile-time
+geometry lives in `src/ui/ScreenGeometry.h` and is verified against the panel
+driver at boot.
 
-- **PSRAM is intentionally disabled** (plain `esp32-s3-devkitc-1` board +
-  `dio_qspi`). The Murphy module has octal PSRAM, but it is not needed —
+- **M5Stack PaperColor** has no touch or frontlight: any button press dismisses
+  an alarm, a button press on the clock forces a sync, and all configuration
+  happens on the web dashboard (the on-device settings cog is hidden). Alarm
+  sound plays through the built-in 1W speaker (ES8311 codec + AW8737A amp,
+  driven by the SDK's AudioManager). Refreshes use the FreeInk SDK's
+  interrupted-waveform driver (~340 ms monochrome instead of the panel's native
+  ~15 s six-color refresh).
+- **PSRAM is intentionally disabled on the Murphy** (plain `esp32-s3-devkitc-1`
+  board + `dio_qspi`). The Murphy module has octal PSRAM, but it is not needed —
   transfers are gzipped and parsing is memory-bounded — and the obvious
-  `…-n16r8` board profile silently force-enables it.
+  `…-n16r8` board profile silently force-enables it. (That was a marginal-chip
+  quirk of the Murphy unit; the PaperColor env keeps PSRAM on.)
 - Pre-build scripts embed the dashboard (`scripts/build_html.py`) and the default
   alarm sound (`scripts/embed_assets.py`); a post-build script archives each ELF
   by SHA (`scripts/archive_elf.py`) for crash-backtrace decoding.

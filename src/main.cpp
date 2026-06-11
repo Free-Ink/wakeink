@@ -1,11 +1,16 @@
-// WakeInk — In Your Space ported to the Murphy M3 e-ink device.
+// WakeInk — In Your Space ported to FreeInk e-ink devices (Murphy M3 and
+// M5Stack PaperColor; one binary per device, selected by the build env).
 //
 // Calendars come in as Google Calendar ICS links pasted into the local web
 // dashboard (http://wakeink.local), get polled in a background task, filtered
 // with the same rules as the Android app, rendered widget-style on the e-ink
-// panel, and ring a full-screen alarm (with frontlight flash) before meetings.
+// panel, and ring a full-screen alarm (with looping sound, plus a frontlight
+// flash where the board has a frontlight) before meetings. Boards without
+// touch (PaperColor) are configured entirely on the web dashboard; their
+// buttons dismiss alarms and force a sync.
 
 #include <Arduino.h>
+#include <BoardConfig.h>
 #include <EInkDisplay.h>
 #include <FreeInkUIInputManager.h>  // ui::snapshotFrom (orientation-aware touch)
 #include <FrontlightManager.h>
@@ -20,6 +25,7 @@
 #include "config/WifiStore.h"
 #include "net/WifiService.h"
 #include "ui/Screen.h"
+#include "ui/ScreenGeometry.h"
 #include "ui/SettingsScreen.h"
 #include "web/WebUi.h"
 
@@ -27,7 +33,9 @@ namespace ui = freeink::ui;
 
 namespace {
 
-EInkDisplay display(4, 3, 5, 6, 7, 8);  // Murphy M3 pins (BoardConfig::MURPHY_M3)
+EInkDisplay display(BoardConfig::ACTIVE.display.sclk, BoardConfig::ACTIVE.display.mosi,
+                    BoardConfig::ACTIVE.display.cs, BoardConfig::ACTIVE.display.dc,
+                    BoardConfig::ACTIVE.display.rst, BoardConfig::ACTIVE.display.busy);
 InputManager input;
 FrontlightManager frontlight;
 Screen* screen = nullptr;
@@ -162,6 +170,15 @@ void setup() {
   stateStore().load();
 
   display.begin();
+  // The UI's compile-time geometry (ScreenGeometry.h) must match the logical
+  // framebuffer the active panel driver reports; a mismatch here means a new
+  // device env shipped without its ScreenGeometry.h entry.
+  if (display.getDisplayWidth() != wakeink::SCREEN_W ||
+      display.getDisplayHeight() != wakeink::SCREEN_H) {
+    Serial.printf("[wakeink] GEOMETRY MISMATCH: driver %ux%u, UI built for %dx%d\n",
+                  display.getDisplayWidth(), display.getDisplayHeight(), wakeink::SCREEN_W,
+                  wakeink::SCREEN_H);
+  }
   input.begin();
   frontlight.begin();
   if (!alarmsound::audio().begin()) {
@@ -171,6 +188,10 @@ void setup() {
   screen = new Screen(display);
   settingsScreen = new SettingsScreen(display, frontlight);
   frontlight.setBrightness((uint8_t)settings().frontlightBrightness);
+  // The PaperColor's interrupted refreshes never run the panel's complete OTP
+  // waveform, so residue accumulates across reboots. Run it once on the boot
+  // screen for a true-white baseline (~15 s on the M5; no-op on other panels).
+  display.requestCompleteWaveformNextRefresh();
   screen->drawMessage("WakeInk", "Starting up...", "v" WAKEINK_VERSION);
   screen->show(true);
 
@@ -262,6 +283,17 @@ void loop() {
       }
       if (webUi().consumeTestAlarm()) {
         startTestAlarm(now);
+        break;
+      }
+
+      // No touch on this board: settings/skip live on the web dashboard. The
+      // confirm key (GPIO1 on the PaperColor) forces a complete-waveform deep
+      // clean (~15 s on the M5 — clears accumulated ghosting); any other key
+      // forces a sync + redraw (the same as tapping empty space below).
+      if (!BoardConfig::hasTouch() && input.wasAnyPressed()) {
+        if (snap.confirm) display.requestCompleteWaveformNextRefresh();
+        calendarManager().requestSync();
+        drawIdleScreen(true);
         break;
       }
 

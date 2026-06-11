@@ -1,8 +1,9 @@
 #pragma once
 
-// Renders the WakeInk screens into the FreeInk 416x240 1-bit framebuffer using
-// FreeInkUI components (statusBar, header, drawText, button) drawn through a
-// GfxText-backed DrawTarget. Layout follows the Android widget: bold event
+// Renders the WakeInk screens into the FreeInk 1-bit framebuffer (per-device
+// landscape geometry, see ScreenGeometry.h) using FreeInkUI components
+// (statusBar, header, drawText, button) drawn through a GfxText-backed
+// DrawTarget. Layout follows the Android widget: bold event
 // title, time line, "No upcoming events" placeholder — plus a status header,
 // an upcoming list, full-screen alarm/setup views, and a tappable event popup.
 

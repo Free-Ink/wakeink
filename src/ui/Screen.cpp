@@ -1,11 +1,13 @@
 #include "Screen.h"
 
+#include <BoardConfig.h>
 #include <FreeInkUI.h>
 #include <qrcode.h>
 
 #include "../config/AppSettings.h"
 #include "CogIcon.h"
 #include "GfxTextDrawTarget.h"
+#include "ScreenGeometry.h"
 
 namespace ui = freeink::ui;
 using wakeink::FONT_BODY;
@@ -17,15 +19,24 @@ using wakeink::FONT_TINY;
 using wakeink::FONT_TITLE;
 
 namespace {
-constexpr int W = 416;
-constexpr int H = 240;
-constexpr int MARGIN = 8;
-constexpr int HEADER_H = 22;
+constexpr int W = wakeink::SCREEN_W;
+constexpr int H = wakeink::SCREEN_H;
+constexpr int MARGIN = wakeink::UI_MARGIN;
+constexpr int HEADER_H = wakeink::UI_HEADER_H;
+constexpr int BANNER_H = wakeink::UI_BANNER_H;
 
-// Canonical panel context: 416x240 framebuffer, landscape CCW (the Murphy
-// driver's native orientation). Touch mapping and rendering both key off this.
+// Canonical panel context: per-device landscape framebuffer (ScreenGeometry.h).
+// Touch mapping and rendering both key off this. The orientation only feeds
+// touchToLogical, so it describes the touch panel's mounting — landscape CCW on
+// Murphy, the only touch device; it is unused on touchless boards.
 ui::DeviceContext makeDevice() {
-  return ui::DeviceContext{W, H, ui::Orientation::LandscapeCounterClockwise, true, true, {}, 0};
+  return ui::DeviceContext{W,
+                           H,
+                           ui::Orientation::LandscapeCounterClockwise,
+                           BoardConfig::hasTouch(),
+                           true,
+                           {},
+                           0};
 }
 
 // A FreeInkUI render context bound to the device framebuffer. Each screen
@@ -176,6 +187,18 @@ void Screen::drawIdle(const std::vector<Event>& events, const SyncStatus& sync, 
   ui::DrawTarget& t = c.target;
   const bool use24 = settings().use24HourTime;
 
+  // Page skeleton on the FreeInkUI grid: header band / content / footer. The
+  // bands are per-device metrics + line heights, so the same code fills any
+  // panel the build targets.
+  const int16_t footerH = (int16_t)(lh(t, FONT_SMALL_B) + lh(t, FONT_TINY) + 2);
+  ui::Stack<3> grid(c.device.screen(), ui::Axis::Column, 0);
+  grid.fixed(HEADER_H);
+  grid.flex(1);
+  grid.fixed(footerH);
+  grid.layout();
+  const ui::Rect content = grid.rect(1);
+  const int16_t footerY = grid.rect(2).y;
+
   // --- header: FreeInkUI status bar (inverted), date left / clock right -------
   const String dateStr = formatDate(now);
   const String clockStr = formatClock(now, use24);
@@ -196,10 +219,9 @@ void Screen::drawIdle(const std::vector<Event>& events, const SyncStatus& sync, 
   sb.leading = dateStr.c_str();
   sb.trailing = clockStr.c_str();
   if (!badge.isEmpty()) sb.title = badge.c_str();
-  ui::statusBar(c.frame, ui::Rect{0, 0, W, HEADER_H}, sb);
+  ui::statusBar(c.frame, grid.rect(0), sb);
 
   // --- footer: wakeink.local + IP, with the settings cog at bottom-right ------
-  const int16_t footerY = H - 31;
   const int16_t footerW = W - 2 * MARGIN - 40;  // keep clear of the cog
   String footerDetail;
   if (wifiUp) {
@@ -219,7 +241,9 @@ void Screen::drawIdle(const std::vector<Event>& events, const SyncStatus& sync, 
   // Settings cog (FreeInkUI button with an icon; white background so the
   // default button box doesn't draw a frame around it). Edge/corner reach is
   // SDK-handled: ensureMinTouchRect snaps near-edge hit rects to the bezel.
-  {
+  // Touchless boards (M5 PaperColor) configure on the web dashboard instead,
+  // so the cog would be an unreachable dead end — skip it.
+  if (BoardConfig::hasTouch()) {
     ui::ButtonProps cog;
     cog.icon = ui::BitmapRef{CogIconBits, CogIconW, CogIconH, ui::BitmapFormat::BW1, true};
     cog.action = TAP_SETTINGS;
@@ -228,12 +252,16 @@ void Screen::drawIdle(const std::vector<Event>& events, const SyncStatus& sync, 
   }
 
   if (events.empty()) {
-    ui::drawText(t, ui::Rect{0, 90, W, lh(t, FONT_BODY)}, "No upcoming events",
+    // Centered in the content slot, nudged up a third for visual balance.
+    const int16_t emptyY = (int16_t)(content.y + content.height / 3);
+    ui::drawText(t, ui::Rect{0, emptyY, W, lh(t, FONT_BODY)}, "No upcoming events",
                  style(FONT_BODY, ui::Color::Black, ui::TextAlign::Center));
     if (sync.calendarsTotal == 0) {
       const String hint = "Add calendars at http://" + (wifiUp ? ip : String("192.168.4.1"));
-      ui::drawText(t, ui::Rect{MARGIN, 118, W - 2 * MARGIN, lh(t, FONT_SMALL)}, hint.c_str(),
-                   style(FONT_SMALL, ui::Color::Black, ui::TextAlign::Center));
+      ui::drawText(t,
+                   ui::Rect{MARGIN, (int16_t)(emptyY + lh(t, FONT_BODY) + 10), W - 2 * MARGIN,
+                            lh(t, FONT_SMALL)},
+                   hint.c_str(), style(FONT_SMALL, ui::Color::Black, ui::TextAlign::Center));
     }
     return;
   }
@@ -241,7 +269,7 @@ void Screen::drawIdle(const std::vector<Event>& events, const SyncStatus& sync, 
   // --- next event card (the "widget") ----------------------------------------
   const Event& next = events.front();
   const bool nextIsToday = (now >= next.start && now < next.end) || daysAhead(next.start, now) <= 0;
-  int16_t y = HEADER_H + 7;
+  int16_t y = (int16_t)(content.y + MARGIN - 1);
   const int16_t contentW = W - 2 * MARGIN;
 
   if (!nextIsToday) {
@@ -277,7 +305,7 @@ void Screen::drawIdle(const std::vector<Event>& events, const SyncStatus& sync, 
 
   // --- upcoming list (each row tappable; value = event index) -----------------
   const int16_t rowH = lh(t, FONT_SMALL) + 4;
-  const int16_t timeColW = 78;
+  const int16_t timeColW = wakeink::UI_TIME_COL_W;
   for (size_t i = 1; i < events.size(); ++i) {
     if (y + rowH > footerY - 4) break;
     const Event& ev = events[i];
@@ -320,16 +348,16 @@ void Screen::drawEventPopup(const Event& ev, time_t now) {
   d.messageText = style(FONT_BODY);
   d.buttonText = style(FONT_BODY_B, ui::Color::Black, ui::TextAlign::Center);
   d.styles = dialogPanel();
-  d.buttonHeight = 34;
-  d.gap = 6;
+  d.buttonHeight = wakeink::UI_DIALOG_BTN_H;
+  d.gap = MARGIN - 2;
   d.inputMask = ui::InputDefault | ui::InputBack;  // touch or physical Back
 
   // Size the panel to its content (caption + wrapped headline + time + buttons)
   // and center it, so the time can never collide with the button row.
-  const int16_t w = W - 32;
+  const int16_t w = W - 4 * MARGIN;
   int16_t h = ui::optionDialogHeight(c.target, d, w);
   if (h > H - 8) h = H - 8;
-  ui::optionDialog(c.frame, ui::Rect{16, (int16_t)((H - h) / 2), w, h}, d);
+  ui::optionDialog(c.frame, ui::Rect{2 * MARGIN, (int16_t)((H - h) / 2), w, h}, d);
 }
 
 ui::DeviceContext Screen::deviceContext() const { return makeDevice(); }
@@ -352,9 +380,9 @@ void Screen::drawAlarm(const Event& ev, time_t now) {
   hp.centered = true;
   hp.title = head.c_str();
   hp.titleText = style(FONT_BODY_B, ui::Color::White, ui::TextAlign::Center);
-  ui::header(c.frame, ui::Rect{0, 0, W, 30}, hp);
+  ui::header(c.frame, ui::Rect{0, 0, W, BANNER_H}, hp);
 
-  int16_t y = 42;
+  int16_t y = (int16_t)(BANNER_H + MARGIN + 4);
   const ui::TextStyle titleStyle = style(FONT_HUGE, ui::Color::Black, ui::TextAlign::Left, 3);
   const int16_t titleH =
       ui::measureWrappedText(t, ev.title.c_str(), titleStyle, W - 2 * MARGIN).height;
@@ -368,9 +396,11 @@ void Screen::drawAlarm(const Event& ev, time_t now) {
   ui::HeaderProps foot;
   foot.styles = invertedBanner();
   foot.centered = true;
-  foot.title = "Tap to dismiss";
+  foot.title = BoardConfig::hasTouch() ? "Tap to dismiss" : "Press any button to dismiss";
   foot.titleText = style(FONT_SMALL_B, ui::Color::White, ui::TextAlign::Center);
-  ui::header(c.frame, ui::Rect{0, H - 26, W, 26}, foot);
+  ui::header(c.frame,
+             ui::Rect{0, (int16_t)(H - wakeink::UI_FOOTER_BAND_H), W, wakeink::UI_FOOTER_BAND_H},
+             foot);
 }
 
 void Screen::drawSetupPortal(const String& apSsid, const String& ip, const String& failNote) {
@@ -382,20 +412,20 @@ void Screen::drawSetupPortal(const String& apSsid, const String& ip, const Strin
   hp.styles = invertedBanner();
   hp.title = "WakeInk Setup";
   hp.titleText = style(FONT_BODY_B, ui::Color::White);
-  ui::header(c.frame, ui::Rect{0, 0, W, 30}, hp);
+  ui::header(c.frame, ui::Rect{0, 0, W, BANNER_H}, hp);
 
   // QR (right) joins the open AP in one scan (WIFI: URI format).
-  constexpr int QR_SCALE = 4;
+  constexpr int QR_SCALE = wakeink::UI_QR_SCALE;
   constexpr int QR_SIZE = 29 * QR_SCALE;  // version 3
   const int16_t qrX = W - QR_SIZE - MARGIN - 8;
-  const int16_t qrY = 48;
+  const int16_t qrY = (int16_t)(BANNER_H + MARGIN + 10);
   const String wifiQr = "WIFI:T:nopass;S:" + apSsid + ";;";
   drawQr(t, wifiQr.c_str(), qrX, qrY, QR_SCALE);
   ui::drawText(t, ui::Rect{qrX, (int16_t)(qrY + QR_SIZE + 4), QR_SIZE, lh(t, FONT_TINY)},
                "Scan to join", style(FONT_TINY, ui::Color::Black, ui::TextAlign::Center));
 
   const int16_t textW = qrX - MARGIN - 12;
-  int16_t y = 48;
+  int16_t y = qrY;
   auto row = [&](ui::FontId f, const String& s, int extra = 0) {
     ui::drawText(t, ui::Rect{MARGIN, y, textW, lh(t, f)}, s.c_str(), style(f));
     y += lh(t, f) + extra;
@@ -419,9 +449,9 @@ void Screen::drawMessage(const char* title, const char* line1, const char* line2
   hp.styles = invertedBanner();
   hp.title = title;
   hp.titleText = style(FONT_BODY_B, ui::Color::White);
-  ui::header(c.frame, ui::Rect{0, 0, W, 30}, hp);
+  ui::header(c.frame, ui::Rect{0, 0, W, BANNER_H}, hp);
 
-  int16_t y = 60;
+  int16_t y = (int16_t)(BANNER_H * 2);
   if (line1) {
     ui::drawText(t, ui::Rect{MARGIN, y, W - 2 * MARGIN, lh(t, FONT_BODY)}, line1, style(FONT_BODY));
     y += lh(t, FONT_BODY) + 6;

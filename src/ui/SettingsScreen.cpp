@@ -1,5 +1,7 @@
 #include "SettingsScreen.h"
 
+#include <BoardConfig.h>
+
 #include "../calendar/CalendarManager.h"
 #include "../config/AppSettings.h"
 #include "../config/StateStore.h"
@@ -7,6 +9,7 @@
 #include "../net/WifiService.h"
 #include "GfxTextDrawTarget.h"
 #include "Screen.h"
+#include "ScreenGeometry.h"
 
 namespace ui = freeink::ui;
 using wakeink::FONT_BODY;
@@ -16,8 +19,8 @@ using wakeink::FONT_SMALL_B;
 using wakeink::FONT_TINY;
 
 namespace {
-constexpr int W = 416;
-constexpr int H = 240;
+constexpr int W = wakeink::SCREEN_W;
+constexpr int H = wakeink::SCREEN_H;
 
 // FreeInkUI action ids used by this screen (0 = NO_ACTION).
 enum : ui::ActionId {
@@ -277,7 +280,13 @@ class SettingsCanvas {
 
   SettingsCanvas(uint8_t* fb, ui::InteractionBuffer<48>& buf)
       : target(fb, W, H),
-        device{W, H, ui::Orientation::LandscapeCounterClockwise, true, true, {}, 0},
+        device{W,
+               H,
+               ui::Orientation::LandscapeCounterClockwise,
+               BoardConfig::hasTouch(),
+               true,
+               {},
+               0},
         frame(target, device, input, buf) {}
 };
 

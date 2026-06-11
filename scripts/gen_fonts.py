@@ -18,15 +18,23 @@ OUT_DIR = os.path.join(os.path.dirname(__file__), "..", "lib", "GfxText", "fonts
 FIRST, LAST = 0x20, 0x7E
 
 # (name, ttf_index, pixel_size) — ttf_index: 0=regular, 1=bold
-# Sized for the Murphy M3's 3.7" 416x240 panel (~130 DPI).
+# Two size sets, one per panel (GfxTextDrawTarget binds them per device):
+#  - Murphy M3, 3.7" 416x240 (~130 PPI): 10/12/15/21/28
+#  - M5 PaperColor, 4.0" 600x400 (~180 PPI): ~1.4x linear -> 14/17/21/30/40
 FONTS = [
     ("NotoSans10", 0, 10),
     ("NotoSans12", 0, 12),
     ("NotoSans12B", 1, 12),
+    ("NotoSans14", 0, 14),
     ("NotoSans15", 0, 15),
     ("NotoSans15B", 1, 15),
+    ("NotoSans17", 0, 17),
+    ("NotoSans17B", 1, 17),
+    ("NotoSans21", 0, 21),
     ("NotoSans21B", 1, 21),
     ("NotoSans28B", 1, 28),
+    ("NotoSans30B", 1, 30),
+    ("NotoSans40B", 1, 40),
 ]
 
 THRESHOLD = 128
