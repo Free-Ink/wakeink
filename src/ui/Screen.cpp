@@ -190,28 +190,9 @@ String Screen::formatDate(time_t t) {
 }
 
 void Screen::show(bool full) {
-#if FREEINK_DEVICE_M5
-  // Mount the PaperColor with its physical buttons along the TOP edge: rotate
-  // the finished frame 180° before pushing. For a 1-bit buffer whose rows are
-  // byte-aligned, (x,y) -> (W-1-x, H-1-y) is exactly "reverse the whole bit
-  // string": swap mirrored bytes end-to-end, bit-reversing each. One cheap
-  // O(n) pass over 30 KB; every draw repaints from scratch, so flipping the
-  // buffer in place never corrupts later drawing. Done here (the app's single
-  // push point) rather than in the SDK driver — orientation is an app choice.
-  auto rev = [](uint8_t b) {
-    b = (uint8_t)(((b & 0xF0) >> 4) | ((b & 0x0F) << 4));
-    b = (uint8_t)(((b & 0xCC) >> 2) | ((b & 0x33) << 2));
-    return (uint8_t)(((b & 0xAA) >> 1) | ((b & 0x55) << 1));
-  };
-  uint8_t* fb = display_.getFrameBuffer();
-  const uint32_t len = display_.getBufferSize();
-  for (uint32_t i = 0, j = len - 1; i < j; ++i, --j) {
-    const uint8_t a = rev(fb[i]);
-    fb[i] = rev(fb[j]);
-    fb[j] = a;
-  }
-  if (len & 1) fb[len / 2] = rev(fb[len / 2]);
-#endif
+  // Every draw repaints from scratch, so flipping the buffer in place never
+  // corrupts later drawing.
+  wakeink::flipFrameForMount(display_.getFrameBuffer(), display_.getBufferSize());
   display_.displayBuffer(full ? EInkDisplay::FULL_REFRESH : EInkDisplay::FAST_REFRESH);
 }
 

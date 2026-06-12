@@ -17,6 +17,32 @@ namespace wakeink {
 // in light mode, black in dark mode. Shared here so the screens can't drift.
 inline uint8_t clearColor() { return settings().darkMode ? 0x00 : 0xFF; }
 
+// 180° mount flip (M5 PaperColor: buttons along the top edge), applied to the
+// finished frame just before each push. With byte-aligned rows, (x,y) ->
+// (W-1-x, H-1-y) is exactly "reverse the whole bit string": swap mirrored
+// bytes end-to-end, bit-reversing each. Shared here so every screen that
+// pushes the framebuffer (Screen::show, SettingsScreen::draw) flips
+// identically — orientation is an app choice, so it lives app-side, not in
+// the SDK driver. No-op on other devices.
+inline void flipFrameForMount(uint8_t* fb, uint32_t len) {
+#if FREEINK_DEVICE_M5
+  auto rev = [](uint8_t b) {
+    b = (uint8_t)(((b & 0xF0) >> 4) | ((b & 0x0F) << 4));
+    b = (uint8_t)(((b & 0xCC) >> 2) | ((b & 0x33) << 2));
+    return (uint8_t)(((b & 0xAA) >> 1) | ((b & 0x55) << 1));
+  };
+  for (uint32_t i = 0, j = len - 1; i < j; ++i, --j) {
+    const uint8_t a = rev(fb[i]);
+    fb[i] = rev(fb[j]);
+    fb[j] = a;
+  }
+  if (len & 1) fb[len / 2] = rev(fb[len / 2]);
+#else
+  (void)fb;
+  (void)len;
+#endif
+}
+
 // Alongside the framebuffer size, each device binds its own UI scale: glyph
 // tables (GfxTextDrawTarget::fontFor) and the chrome metrics below. This is
 // the FreeInkUI scaling model — layout adapts through per-device sizes and

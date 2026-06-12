@@ -127,8 +127,19 @@ const TabDef TABS[TAB_COUNT] = {
     {TAB_ALARM, 6}, {TAB_SOUND, 4}, {TAB_FILTER, 8}, {TAB_CLOCK, 4}, {TAB_SYSTEM, 6},
 };
 
-constexpr int CONTENT_Y = 66;
-constexpr int ROW_H = 28;
+// Chrome scale: this screen was laid out in Murphy pixels. The M5 binds ~1.4x
+// fonts (same physical size at its higher PPI — see ScreenGeometry.h), so its
+// chrome scales by the same factor or labels overflow their boxes. Hit
+// paddings stay unscaled: touch bands only matter on Murphy (scale 1), and on
+// the M5 the rects are only focus-rendering geometry.
+#if FREEINK_DEVICE_M5
+constexpr int16_t S(int v) { return (int16_t)((v * 7 + 2) / 5); }  // x1.4
+#else
+constexpr int16_t S(int v) { return (int16_t)v; }
+#endif
+
+constexpr int CONTENT_Y = S(66);
+constexpr int ROW_H = S(28);
 constexpr int MAX_ROWS = 6;  // rows that fit; longer tabs paginate
 
 const int POLL_PRESETS[] = {1, 2, 3, 5, 10, 15, 30, 60};
@@ -323,6 +334,7 @@ void SettingsScreen::draw(EInkDisplay::RefreshMode mode) {
   // Guard: rows past the buffer cap would silently become un-tappable.
   if (interactions_.overflowed()) Serial.println("[ui] settings interaction buffer overflow");
 
+  wakeink::flipFrameForMount(display_.getFrameBuffer(), display_.getBufferSize());
   display_.displayBuffer(mode);
 }
 
@@ -343,7 +355,7 @@ void SettingsScreen::drawNormal(SettingsCanvas& c) {
   ui::StyleSet headerStyle;
   headerStyle.normal.background = ui::Paint::solid(ui::Color::Black);
   hp.styles = headerStyle;
-  ui::header(c.frame, ui::Rect{0, 0, W, 30}, hp);
+  ui::header(c.frame, ui::Rect{0, 0, W, S(30)}, hp);
 
   ui::ButtonProps closeBtn;
   closeBtn.label = "Close";
@@ -354,10 +366,10 @@ void SettingsScreen::drawNormal(SettingsCanvas& c) {
   closeBtn.minTouchSize = 0;
   // Edge reach is SDK-handled now: ensureMinTouchRect snaps near-edge hit
   // rects to the screen boundary, so the corner taps land on this button.
-  ui::button(c.frame, ui::Rect{W - 70, 3, 64, 24}, closeBtn);
+  ui::button(c.frame, ui::Rect{(int16_t)(W - S(70)), S(3), S(64), S(24)}, closeBtn);
 
   // Tab bar.
-  const int16_t tabW = (W - 8) / TAB_COUNT;
+  const int16_t tabW = (int16_t)((W - S(8)) / TAB_COUNT);
   for (int i = 0; i < TAB_COUNT; ++i) {
     ui::ButtonProps tabBtn;
     tabBtn.label = TAB_NAMES[i];
@@ -367,7 +379,7 @@ void SettingsScreen::drawNormal(SettingsCanvas& c) {
     tabBtn.text = txt(FONT_SMALL_B, ui::Color::Black, ui::TextAlign::Center);
     tabBtn.styles = ghostButton();
     tabBtn.minTouchSize = 0;
-    ui::button(c.frame, ui::Rect{(int16_t)(4 + i * tabW), 34, (int16_t)(tabW - 2), 28}, tabBtn);
+    ui::button(c.frame, ui::Rect{(int16_t)(S(4) + i * tabW), S(34), (int16_t)(tabW - S(2)), S(28)}, tabBtn);
   }
 
   // Content rows (with simple pagination when a tab overflows).
@@ -387,7 +399,7 @@ void SettingsScreen::drawNormal(SettingsCanvas& c) {
     // Label (no dimmed look on a 1-bit panel; INFO rows use a tiny-font value).
     // ACTION rows skip it — their full-width button carries the label itself.
     if (row.kind != Kind::ACTION) {
-      ui::drawText(t, ui::Rect{10, midY, 190, ROW_H}, row.label, txt(FONT_SMALL));
+      ui::drawText(t, ui::Rect{S(10), midY, S(190), ROW_H}, row.label, txt(FONT_SMALL));
     }
 
     switch (row.kind) {
@@ -402,12 +414,12 @@ void SettingsScreen::drawNormal(SettingsCanvas& c) {
         b.styles = ghostButton();
         b.minTouchSize = 0;
         b.hitPadding = ui::Insets{2, 6, 4, 4};  // full row height, W-74..W-4
-        ui::button(c.frame, ui::Rect{W - 70, (int16_t)(y + 2), 60, ROW_H - 6}, b);
+        ui::button(c.frame, ui::Rect{(int16_t)(W - S(70)), (int16_t)(y + S(2)), S(60), (int16_t)(ROW_H - S(6))}, b);
         break;
       }
       case Kind::STEPPER: {
         const String v = valueFor(row.item);
-        ui::drawText(t, ui::Rect{W - 216, midY, 96, ROW_H}, v.c_str(),
+        ui::drawText(t, ui::Rect{(int16_t)(W - S(216)), midY, S(96), ROW_H}, v.c_str(),
                      txt(FONT_SMALL_B, ui::Color::Black, ui::TextAlign::Right));
         // Wide [-]/[+] targets (52px visual, 56px band, ~11mm) — small steppers
         // plus finger scatter made repeated taps unreliable.
@@ -421,12 +433,12 @@ void SettingsScreen::drawNormal(SettingsCanvas& c) {
         // Contiguous bands meeting at the gap midpoint: [-] owns W-118..W-60,
         // [+] owns W-60 rightward (the bezel snap finishes the right edge).
         minus.hitPadding = ui::Insets{2, 2, 2, 4};
-        ui::button(c.frame, ui::Rect{W - 114, (int16_t)(y + 2), 52, ROW_H - 4}, minus);
+        ui::button(c.frame, ui::Rect{(int16_t)(W - S(114)), (int16_t)(y + S(2)), S(52), (int16_t)(ROW_H - S(4))}, minus);
         ui::ButtonProps plus = minus;
         plus.label = "+";
         plus.action = A_INC;
         plus.hitPadding = ui::Insets{2, 2, 2, 2};
-        ui::button(c.frame, ui::Rect{W - 58, (int16_t)(y + 2), 52, ROW_H - 4}, plus);
+        ui::button(c.frame, ui::Rect{(int16_t)(W - S(58)), (int16_t)(y + S(2)), S(52), (int16_t)(ROW_H - S(4))}, plus);
         break;
       }
       case Kind::ACTION: {
@@ -438,19 +450,19 @@ void SettingsScreen::drawNormal(SettingsCanvas& c) {
         b.styles = ghostButton();
         b.minTouchSize = 0;
         b.hitPadding = ui::Insets{2, 8, 4, 8};  // full row, edge to edge
-        ui::button(c.frame, ui::Rect{8, (int16_t)(y + 2), W - 16, ROW_H - 6}, b);
+        ui::button(c.frame, ui::Rect{S(8), (int16_t)(y + S(2)), (int16_t)(W - S(16)), (int16_t)(ROW_H - S(6))}, b);
         break;
       }
       case Kind::PICKER: {
         const String v = valueFor(row.item) + "  >";
-        ui::drawText(t, ui::Rect{150, midY, W - 160, ROW_H}, v.c_str(),
+        ui::drawText(t, ui::Rect{S(150), midY, (int16_t)(W - S(160)), ROW_H}, v.c_str(),
                      txt(FONT_SMALL_B, ui::Color::Black, ui::TextAlign::Right));
         c.frame.hit(ui::Rect{0, y, W, ROW_H}, A_DO, row.item);
         break;
       }
       case Kind::DAYS: {
         static const char* dayLetters[] = {"M", "T", "W", "T", "F", "S", "S"};
-        const int16_t chipW = 28;
+        const int16_t chipW = S(28);
         for (int d = 1; d <= 7; ++d) {
           bool on = false;
           for (int wd : settings().workDays) {
@@ -465,14 +477,14 @@ void SettingsScreen::drawNormal(SettingsCanvas& c) {
           chip.styles = ghostButton();
           chip.minTouchSize = 0;
           chip.hitPadding = ui::Insets{2, 1, 4, 1};  // full row height, chips stay disjoint
-          const int16_t chipX = (int16_t)(W - 10 - (8 - d) * (chipW + 2));
-          ui::button(c.frame, ui::Rect{chipX, (int16_t)(y + 2), chipW, ROW_H - 6}, chip);
+          const int16_t chipX = (int16_t)(W - S(10) - (8 - d) * (chipW + S(2)));
+          ui::button(c.frame, ui::Rect{chipX, (int16_t)(y + S(2)), chipW, (int16_t)(ROW_H - S(6))}, chip);
         }
         break;
       }
       case Kind::INFO: {
         const String v = valueFor(row.item);
-        ui::drawText(t, ui::Rect{110, midY, W - 120, ROW_H}, v.c_str(),
+        ui::drawText(t, ui::Rect{S(110), midY, (int16_t)(W - S(120)), ROW_H}, v.c_str(),
                      txt(FONT_TINY, ui::Color::Black, ui::TextAlign::Right));
         break;
       }
@@ -493,17 +505,17 @@ void SettingsScreen::drawNormal(SettingsCanvas& c) {
     prev.minTouchSize = 0;
     prev.enabled = page_ > 0;  // disabled buttons register no hit rect
     prev.hitPadding = ui::Insets{2, 6, 4, 8};  // full row, 0..124
-    ui::button(c.frame, ui::Rect{8, (int16_t)(y + 2), 110, ROW_H - 6}, prev);
+    ui::button(c.frame, ui::Rect{S(8), (int16_t)(y + S(2)), S(110), (int16_t)(ROW_H - S(6))}, prev);
 
     ui::ButtonProps nextB = prev;
     nextB.label = "Next >";
     nextB.value = (int16_t)(page_ + 1);
     nextB.enabled = page_ + 1 < pageCount;
     nextB.hitPadding = ui::Insets{2, 8, 4, 6};  // full row, W-124..W
-    ui::button(c.frame, ui::Rect{W - 118, (int16_t)(y + 2), 110, ROW_H - 6}, nextB);
+    ui::button(c.frame, ui::Rect{(int16_t)(W - S(118)), (int16_t)(y + S(2)), S(110), (int16_t)(ROW_H - S(6))}, nextB);
 
     const String pos = "Page " + String(page_ + 1) + " of " + String(pageCount);
-    ui::drawText(t, ui::Rect{126, y, W - 252, ROW_H}, pos.c_str(),
+    ui::drawText(t, ui::Rect{S(126), y, (int16_t)(W - S(252)), ROW_H}, pos.c_str(),
                  txt(FONT_TINY, ui::Color::Black, ui::TextAlign::Center));
   }
 }
@@ -515,7 +527,7 @@ void SettingsScreen::drawTzPicker(SettingsCanvas& c) {
   ui::StyleSet headerStyle;
   headerStyle.normal.background = ui::Paint::solid(ui::Color::Black);
   hp.styles = headerStyle;
-  ui::header(c.frame, ui::Rect{0, 0, W, 30}, hp);
+  ui::header(c.frame, ui::Rect{0, 0, W, S(30)}, hp);
 
   ui::ButtonProps backBtn;
   backBtn.label = "Back";
@@ -524,7 +536,7 @@ void SettingsScreen::drawTzPicker(SettingsCanvas& c) {
   backBtn.text = txt(FONT_SMALL_B, ui::Color::White, ui::TextAlign::Center);
   backBtn.styles = onHeaderButton();
   backBtn.minTouchSize = 0;
-  ui::button(c.frame, ui::Rect{W - 70, 3, 64, 24}, backBtn);
+  ui::button(c.frame, ui::Rect{(int16_t)(W - S(70)), S(3), S(64), S(24)}, backBtn);
 
   // Zone list via the FreeInkUI list component (virtualized by topIndex).
   static ui::ListItem items[TIMEZONE_COUNT];
@@ -533,7 +545,7 @@ void SettingsScreen::drawTzPicker(SettingsCanvas& c) {
     items[i].label = TIMEZONES[i].name;
     items[i].actionValue = (int16_t)i;
   }
-  const ui::Rect listRect{8, 34, W - 16, H - 34 - 36};
+  const ui::Rect listRect{S(8), S(34), (int16_t)(W - S(16)), (int16_t)(H - S(34) - S(36))};
   ui::ListProps lp;
   lp.items = items;
   lp.count = TIMEZONE_COUNT;
@@ -541,7 +553,7 @@ void SettingsScreen::drawTzPicker(SettingsCanvas& c) {
   lp.selectedIndex = (int16_t)currentTzIndex();
   lp.action = A_TZ_ROW;
   lp.labelText = txt(FONT_SMALL);
-  lp.rowHeight = 27;
+  lp.rowHeight = S(27);
   lp.selectionMarker = ui::SelectionMarker::Triangle;
   ui::list(c.frame, listRect, lp);
 
@@ -557,18 +569,18 @@ void SettingsScreen::drawTzPicker(SettingsCanvas& c) {
   prev.enabled = tzTop_ > 0;
   // Bottom-edge reach is SDK-owned: the buttons end 4px from the bezel, inside
   // the 12px edge-snap threshold, so their hit rects already extend to it.
-  ui::button(c.frame, ui::Rect{8, H - 32, 120, 28}, prev);
+  ui::button(c.frame, ui::Rect{S(8), (int16_t)(H - S(32)), S(120), S(28)}, prev);
 
   ui::ButtonProps next = prev;
   next.label = "Next";
   next.value = (int16_t)visible;
   next.enabled = tzTop_ + visible < TIMEZONE_COUNT;
-  ui::button(c.frame, ui::Rect{W - 128, H - 32, 120, 28}, next);
+  ui::button(c.frame, ui::Rect{(int16_t)(W - S(128)), (int16_t)(H - S(32)), S(120), S(28)}, next);
 
   const uint16_t lastShown =
       tzTop_ + visible < TIMEZONE_COUNT ? (uint16_t)(tzTop_ + visible) : (uint16_t)TIMEZONE_COUNT;
   const String pos = String(tzTop_ + 1) + "-" + String(lastShown) + " of " + String((int)TIMEZONE_COUNT);
-  ui::drawText(c.target, ui::Rect{136, H - 32, W - 272, 28}, pos.c_str(),
+  ui::drawText(c.target, ui::Rect{S(136), (int16_t)(H - S(32)), (int16_t)(W - S(272)), S(28)}, pos.c_str(),
                txt(FONT_TINY, ui::Color::Black, ui::TextAlign::Center));
 }
 
@@ -598,13 +610,13 @@ void SettingsScreen::overlayPause(SettingsCanvas& c) {
   panel.normal.border = ui::Paint::solid(ui::Color::Black);
   panel.normal.borderWidth = 2;
   d.styles = panel;
-  d.buttonHeight = 30;
-  d.gap = 5;
+  d.buttonHeight = S(30);
+  d.gap = S(5);
   d.verticalOptions = true;
   // No dim scrim: the LightGray dither reads as broken speckle on a 1-bit
   // panel; the bordered panel separates fine on its own.
   d.dimBackground = false;
-  const int16_t w = 220;
+  const int16_t w = S(220);
   const int16_t h = ui::optionDialogHeight(c.target, d, w);
   ui::optionDialog(c.frame, ui::Rect{(int16_t)((W - w) / 2), (int16_t)((H - h) / 2), w, h}, d);
 }
@@ -626,10 +638,10 @@ void SettingsScreen::overlayReboot(SettingsCanvas& c) {
   panel.normal.border = ui::Paint::solid(ui::Color::Black);
   panel.normal.borderWidth = 2;
   d.styles = panel;
-  d.buttonHeight = 34;
+  d.buttonHeight = S(34);
   d.inputMask = ui::InputDefault | ui::InputBack;
   d.dimBackground = false;  // see overlayPause: dither scrim looks broken on 1-bit
-  const int16_t w = 260;
+  const int16_t w = S(260);
   const int16_t h = ui::optionDialogHeight(c.target, d, w);
   ui::optionDialog(c.frame, ui::Rect{(int16_t)((W - w) / 2), (int16_t)((H - h) / 2), w, h}, d);
 }
