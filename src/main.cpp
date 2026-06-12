@@ -67,6 +67,10 @@ constexpr uint32_t FULL_REFRESH_EVERY = 30;  // minute ticks between deep cleans
 bool darkChordArmed = true;
 uint32_t lastChordMs = 0;
 constexpr uint32_t CHORD_COOLDOWN_MS = 600;
+// GPIO event selection (buttons-only boards): an untouched selection clears
+// itself after this long so the idle screen doesn't keep a stale highlight.
+uint32_t lastFocusInputMs = 0;
+constexpr uint32_t FOCUS_TIMEOUT_MS = 30000;
 
 // Idle key actions are suppressed until this time — set when an alarm is
 // dismissed so the dismissing key's release can't double as an idle action.
@@ -143,6 +147,7 @@ void enterIdle() {
   // Restore the user's steady frontlight level (0 = off) after alarms/menus.
   frontlight.setBrightness((uint8_t)settings().frontlightBrightness);
   fastRefreshCount = 0;
+  screen->clearFocus();  // a fresh idle screen starts with no GPIO selection
   drawIdleScreen(true);
 }
 
@@ -503,15 +508,13 @@ void loop() {
         break;
       }
 
-      // No touch on this board: settings/skip live on the web dashboard, so
-      // the physical keys drive everything. Holding up+down together toggles
-      // dark mode. On a single key release: a short confirm press (GPIO1 on
-      // the PaperColor) hibernates, a press-and-hold of the same key (the
-      // synthesized BACK) forces a complete-waveform deep clean (~15 s on the
-      // M5 — clears accumulated ghosting), and up/down force a sync + redraw
-      // (the same as tapping empty space below). Single-key actions fire on
-      // RELEASE, after a chord cooldown, so a forming or ending chord can't
-      // trigger them.
+      // No touch on this board: the physical keys drive event selection.
+      // Holding up+down together toggles dark mode. On single key releases:
+      // up/down move the GPIO focus through the event list, a short confirm
+      // press (GPIO1 on the PaperColor) opens the focused event's skip popup
+      // (or starts a selection if none), and a press-and-hold of the same key
+      // (the synthesized BACK) hibernates. Actions fire on RELEASE, after a
+      // chord cooldown, so a forming or ending chord can't trigger them.
       if (!BoardConfig::hasTouch()) {
         if (input.isPressed(InputManager::BTN_UP) && input.isPressed(InputManager::BTN_DOWN)) {
           lastChordMs = ms;
@@ -525,23 +528,57 @@ void loop() {
         }
         darkChordArmed = true;
 
+        // Stale selection fades out instead of lingering forever.
+        if (screen->hasFocus() && ms - lastFocusInputMs > FOCUS_TIMEOUT_MS) {
+          screen->clearFocus();
+          drawIdleScreen(false);
+          break;
+        }
+
         if (anyKeyReleased && ms - lastChordMs > CHORD_COOLDOWN_MS && ms >= keyQuietUntilMs) {
-          if (snap.confirm) {
+          if (input.wasReleased(InputManager::BTN_BACK)) {
             enterHibernate();
             break;
           }
-          if (input.wasReleased(InputManager::BTN_BACK)) {
-            display.requestCompleteWaveformNextRefresh();
-            lastCompleteWaveformMs = ms;  // manual clean resets the hourly pass
-            webUi().notePanelMaintenance();
-            calendarManager().requestSync();
-            drawIdleScreen(true);  // complete waveform (~15 s)
-            for (int pass = 0; pass < 3; ++pass) drawIdleScreen(true);  // settle the seam
+          if (input.wasReleased(InputManager::BTN_UP) ||
+              input.wasReleased(InputManager::BTN_DOWN)) {
+            // Move the selection (release-edge, so a chord can't half-fire).
+            // With no selection yet, the first press starts one at the top.
+            lastFocusInputMs = ms;
+            if (!screen->hasFocus()) {
+              screen->focusAction(Screen::TAP_EVENT);
+            } else {
+              ui::InputSnapshot nav{};
+              nav.focusPrev = input.wasReleased(InputManager::BTN_UP);
+              nav.focusNext = input.wasReleased(InputManager::BTN_DOWN);
+              screen->route(nav);
+            }
+            drawIdleScreen(false);
             break;
           }
-          calendarManager().requestSync();
-          drawIdleScreen(true);
-          break;
+          if (snap.confirm) {
+            if (!screen->hasFocus()) {
+              lastFocusInputMs = ms;
+              screen->focusAction(Screen::TAP_EVENT);
+              drawIdleScreen(false);
+              break;
+            }
+            const Screen::Tap r = screen->route(snap);
+            if (r.action == Screen::TAP_EVENT) {
+              const auto events = calendarManager().snapshot();
+              if (r.value >= 0 && r.value < (int)events.size()) {
+                popupEvent = events[r.value];
+                uiState = UiState::POPUP;
+                // Double draw: the first registers the dialog's interactions,
+                // then focus lands on Skip and the second renders it outlined.
+                screen->drawEventPopup(popupEvent, now);
+                screen->focusAction(Screen::TAP_SKIP);
+                screen->drawEventPopup(popupEvent, now);
+                screen->show(true);
+              }
+            }
+            break;
+          }
         }
       }
 
@@ -636,10 +673,27 @@ void loop() {
         startAlarm(candidate);
         break;
       }
-      if (gotTap || snap.back) {
-        // One route() handles both: a tap resolves by position, a Back press
-        // resolves to the Cancel button (registered with InputBack).
+      // Buttons-only boards: up/down move the dialog's GPIO focus between
+      // Cancel and Skip (redrawn to show the outline), confirm activates it.
+      if (!BoardConfig::hasTouch() &&
+          (input.wasReleased(InputManager::BTN_UP) ||
+           input.wasReleased(InputManager::BTN_DOWN))) {
+        ui::InputSnapshot nav{};
+        nav.focusPrev = input.wasReleased(InputManager::BTN_UP);
+        nav.focusNext = input.wasReleased(InputManager::BTN_DOWN);
+        screen->route(nav);
+        screen->drawEventPopup(popupEvent, now);
+        screen->show(false);
+        break;
+      }
+      if (gotTap || snap.back || snap.confirm) {
+        // One route() handles all: a tap resolves by position, a Back press
+        // resolves to the Cancel button (registered with InputBack), and a
+        // confirm press resolves to the focused button.
         const Screen::Tap r = screen->route(snap);
+        if (snap.confirm && !gotTap && !snap.back && r.action == Screen::TAP_NONE) {
+          break;  // confirm with nothing focused: ignore, keep the popup
+        }
         if (r.action == Screen::TAP_SKIP) {
           calendarManager().lockConfig();
           stateStore().skip(popupEvent.skipKey());

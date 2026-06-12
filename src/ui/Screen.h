@@ -49,6 +49,14 @@ class Screen {
   // the renderer and by the caller's ui::snapshotFrom touch mapping.
   freeink::ui::DeviceContext deviceContext() const;
 
+  // GPIO focus (buttons-only boards). Focus indices live in the interaction
+  // buffer and persist across redraws; the focused control renders highlighted
+  // (inverted list row / outlined card / outlined dialog button) and a
+  // confirm press activates it via route().
+  void focusAction(int action);  // focus the first control carrying `action`
+  void clearFocus();
+  bool hasFocus() const;
+
   // Pushes the framebuffer to the panel.
   void show(bool full);
 

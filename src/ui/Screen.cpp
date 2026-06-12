@@ -190,6 +190,28 @@ String Screen::formatDate(time_t t) {
 }
 
 void Screen::show(bool full) {
+#if FREEINK_DEVICE_M5
+  // Mount the PaperColor with its physical buttons along the TOP edge: rotate
+  // the finished frame 180° before pushing. For a 1-bit buffer whose rows are
+  // byte-aligned, (x,y) -> (W-1-x, H-1-y) is exactly "reverse the whole bit
+  // string": swap mirrored bytes end-to-end, bit-reversing each. One cheap
+  // O(n) pass over 30 KB; every draw repaints from scratch, so flipping the
+  // buffer in place never corrupts later drawing. Done here (the app's single
+  // push point) rather than in the SDK driver — orientation is an app choice.
+  auto rev = [](uint8_t b) {
+    b = (uint8_t)(((b & 0xF0) >> 4) | ((b & 0x0F) << 4));
+    b = (uint8_t)(((b & 0xCC) >> 2) | ((b & 0x33) << 2));
+    return (uint8_t)(((b & 0xAA) >> 1) | ((b & 0x55) << 1));
+  };
+  uint8_t* fb = display_.getFrameBuffer();
+  const uint32_t len = display_.getBufferSize();
+  for (uint32_t i = 0, j = len - 1; i < j; ++i, --j) {
+    const uint8_t a = rev(fb[i]);
+    fb[i] = rev(fb[j]);
+    fb[j] = a;
+  }
+  if (len & 1) fb[len / 2] = rev(fb[len / 2]);
+#endif
   display_.displayBuffer(full ? EInkDisplay::FULL_REFRESH : EInkDisplay::FAST_REFRESH);
 }
 
@@ -311,8 +333,13 @@ void Screen::drawIdle(const std::vector<Event>& events, const SyncStatus& sync, 
   ui::drawText(t, timeRow, count.c_str(), style(FONT_BODY_B, ui::Color::Black, ui::TextAlign::Right));
   y += lh(t, FONT_BODY) + 5;
 
-  // The whole next-event card is tappable (value 0 = events.front()).
+  // The whole next-event card is tappable (value 0 = events.front()). With GPIO
+  // focus on it (buttons-only boards), outline the card as the selection cue.
   c.frame.hit(ui::Rect{0, cardTop, W, (int16_t)(y - cardTop)}, TAP_EVENT, 0);
+  if (ui::hasState(c.frame.stateFor(TAP_EVENT, 0), ui::StateFocused)) {
+    t.stroke(ui::Rect{2, (int16_t)(cardTop - 3), W - 4, (int16_t)(y - cardTop + 4)},
+             ui::Paint::solid(ui::Color::Black), 2, 0, ui::CornersAll);
+  }
 
   t.line(ui::Point{MARGIN, y}, ui::Point{(int16_t)(W - MARGIN), y}, 1,
          ui::Paint::solid(ui::Color::Black));
@@ -324,13 +351,19 @@ void Screen::drawIdle(const std::vector<Event>& events, const SyncStatus& sync, 
   for (size_t i = 1; i < events.size(); ++i) {
     if (y + rowH > footerY - 4) break;
     const Event& ev = events[i];
+    // Register the hit before drawing so stateFor() can see this row's focus
+    // (the same order FreeInkUI components use); a GPIO-focused row renders
+    // inverted as the selection cue.
+    c.frame.hit(ui::Rect{0, y, W, rowH}, TAP_EVENT, (int16_t)i);
+    const bool focused = ui::hasState(c.frame.stateFor(TAP_EVENT, (int16_t)i), ui::StateFocused);
+    if (focused) t.fill(ui::Rect{0, y, W, rowH}, ui::Paint::solid(ui::Color::Black), 0, ui::CornersAll);
+    const ui::Color ink = focused ? ui::Color::White : ui::Color::Black;
     ui::drawText(t, ui::Rect{MARGIN, y, timeColW, rowH}, listTimeLabel(ev.start, now, use24).c_str(),
-                 style(FONT_SMALL_B));
+                 style(FONT_SMALL_B, ink));
     ui::drawText(t,
                  ui::Rect{(int16_t)(MARGIN + timeColW + 6), y,
                           (int16_t)(contentW - timeColW - 6), rowH},
-                 ev.title.c_str(), style(FONT_SMALL));
-    c.frame.hit(ui::Rect{0, y, W, rowH}, TAP_EVENT, (int16_t)i);
+                 ev.title.c_str(), style(FONT_SMALL, ink));
     y += rowH;
   }
 
@@ -363,9 +396,16 @@ void Screen::drawEventPopup(const Event& ev, time_t now) {
   d.messageText = style(FONT_BODY);
   d.buttonText = style(FONT_BODY_B, ui::Color::Black, ui::TextAlign::Center);
   d.styles = dialogPanel();
+  // Buttons-only boards drive the dialog by GPIO focus (up/down move it,
+  // confirm activates): the focused option gets a heavy outline so the
+  // selection is visible without touch.
+  d.buttonStyles.normal.border = ui::Paint::solid(ui::Color::Black);
+  d.buttonStyles.normal.borderWidth = 1;
+  d.buttonStyles.focused.border = ui::Paint::solid(ui::Color::Black);
+  d.buttonStyles.focused.borderWidth = 3;
   d.buttonHeight = wakeink::UI_DIALOG_BTN_H;
   d.gap = MARGIN - 2;
-  d.inputMask = ui::InputDefault | ui::InputBack;  // touch or physical Back
+  d.inputMask = ui::InputDefault | ui::InputBack;  // touch, focus+confirm, or Back
 
   // Size the panel to its content (caption + wrapped headline + time + buttons)
   // and center it, so the time can never collide with the button row.
@@ -381,6 +421,21 @@ Screen::Tap Screen::route(const ui::InputSnapshot& input) {
   const ui::ActionEvent ev = interactions_.route(input);
   return Tap{(int)ev.action, (int)ev.value};
 }
+
+void Screen::focusAction(int action) {
+  const ui::Interaction* data = interactions_.data();
+  for (int16_t i = 0; i < (int16_t)interactions_.count(); ++i) {
+    if (data[i].action == action) {
+      interactions_.setFocusedIndex(i);
+      return;
+    }
+  }
+  interactions_.setFocusedIndex(-1);
+}
+
+void Screen::clearFocus() { interactions_.setFocusedIndex(-1); }
+
+bool Screen::hasFocus() const { return interactions_.focusedIndex() >= 0; }
 
 void Screen::drawAlarm(const Event& ev, time_t now) {
   display_.clearScreen(clearColor());
