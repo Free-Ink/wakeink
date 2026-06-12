@@ -163,6 +163,14 @@ void CalendarManager::runSync() {
 
   xSemaphoreTake(mutex_, portMAX_DELAY);
   stateStore().pruneSkips(now);
+  // Dirty only when the displayed content actually changed — a no-change poll
+  // must not redraw the panel (on the M5 a content redraw is a ~15 s complete
+  // waveform, so per-sync churn would blackout the screen every poll).
+  const bool changed =
+      filtered.size() != events_.size() ||
+      !std::equal(filtered.begin(), filtered.end(), events_.begin(), [](const Event& a, const Event& b) {
+        return a.start == b.start && a.end == b.end && a.calIndex == b.calIndex && a.title == b.title;
+      });
   events_ = std::move(filtered);
   status_.lastSyncTime = time(nullptr);
   status_.lastSyncOk = (okCount == total);
@@ -185,11 +193,11 @@ void CalendarManager::runSync() {
 
   // stack_low is this task's high-water mark in bytes-remaining: if it ever
   // approaches 0, the stack budget above needs raising again.
-  Serial.printf("[sync] done ok=%d/%d events=%u heap=%lu min=%lu stack_low=%u\n", okCount, total,
-                (unsigned)events_.size(), (unsigned long)ESP.getFreeHeap(),
+  Serial.printf("[sync] done ok=%d/%d events=%u changed=%d heap=%lu min=%lu stack_low=%u\n", okCount,
+                total, (unsigned)events_.size(), (int)changed, (unsigned long)ESP.getFreeHeap(),
                 (unsigned long)esp_get_minimum_free_heap_size(),
                 (unsigned)uxTaskGetStackHighWaterMark(nullptr));
-  dirty_ = true;
+  if (changed) dirty_ = true;
 }
 
 void CalendarManager::refilterNow() {

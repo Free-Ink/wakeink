@@ -104,13 +104,21 @@ uint32_t keyQuietUntilMs = 0;
 uint32_t lastLedAssertMs = 0;
 constexpr uint32_t LED_ASSERT_PERIOD_MS = 500;
 
-// Panel DC-balance maintenance (M5 PaperColor): interrupted refreshes cut the
-// OTP waveform short, so each one leaves a little net charge on the pixels —
-// over hours the panel darkens and colors fade. The complete waveform is the
-// only DC-balanced cycle; promote one redraw per hour to it (~15 s blackout).
-// requestCompleteWaveformNextRefresh() is a no-op on other panels.
+// M5 PaperColor refresh strategy: interrupted refreshes are never clean for
+// long — regardless of polarity the panel muddies and darkens within minutes
+// of standing on one. So the STANDING image is always the complete OTP
+// waveform's truthful render (true white, full color), redrawn every 15
+// minutes (~15 s blackout each). Interrupted refreshes are reserved for
+// interaction frames (keys, popups, settings, alarms, data updates), whose
+// instability is transient — the next scheduled pass wipes it. Cost: the idle
+// clock/countdown advance in 15-minute jumps on the M5. Murphy keeps its
+// per-minute ticks. requestCompleteWaveformNextRefresh() is a no-op there.
 uint32_t lastCompleteWaveformMs = 0;
+#if FREEINK_DEVICE_M5
+constexpr uint32_t COMPLETE_WAVEFORM_INTERVAL_MS = 15UL * 60UL * 1000UL;
+#else
 constexpr uint32_t COMPLETE_WAVEFORM_INTERVAL_MS = 60UL * 60UL * 1000UL;
+#endif
 // Don't start a ~15 s blocking refresh if an alarm would ring during/near it.
 constexpr time_t MAINTENANCE_ALARM_GUARD_S = 180;
 
@@ -628,39 +636,50 @@ void loop() {
         break;
       }
 
-      // Redraw when new data landed or settings changed.
+      // Redraw when content changed (events differ after a sync / a skip from
+      // the web / display settings changed).
       if (calendarManager().consumeDirtyFlag() || webUi().consumeDisplayRefresh()) {
+#if FREEINK_DEVICE_M5
+        // The new content becomes the standing image, so render it with the
+        // complete waveform (and restart the 15-minute clock) — this is what
+        // upgrades the first post-boot sync from a muddy interrupted frame to
+        // a clean one. Deferred to a quick draw if an alarm is imminent; the
+        // scheduled pass cleans up after it.
+        Event soon;
+        if (!calendarManager().nextAlarm(now + MAINTENANCE_ALARM_GUARD_S, soon)) {
+          display.requestCompleteWaveformNextRefresh();
+          lastCompleteWaveformMs = ms;
+          webUi().notePanelMaintenance();
+        }
+        drawIdleScreen(true);
+#else
         drawIdleScreen(false);
+#endif
         break;
       }
 
-      // Minute tick keeps the clock + countdowns fresh; occasionally deep-clean.
       struct tm tmv;
       localtime_r(&now, &tmv);
       if (tmv.tm_min != lastDrawnMinute && now > 1600000000) {
-        ++fastRefreshCount;
-        const bool full = fastRefreshCount % FULL_REFRESH_EVERY == 0;
-        // Hourly DC-balance pass, skipped when an alarm is about to ring (the
-        // complete waveform blocks the loop for ~15 s). The complete waveform
-        // settles true white but every later partial update is interrupted-
-        // yellow, which reads as a stain — so follow it immediately with a
-        // full interrupted pass to put the whole panel on one uniform
-        // baseline. (The balance benefit comes from the complete cycle having
-        // run, not from its white staying on screen.)
+#if FREEINK_DEVICE_M5
+        // The standing image is always a complete-waveform render: redraw only
+        // when the 15-minute pass is due (deferred while an alarm is about to
+        // ring — the waveform blocks the loop ~15 s), and leave its truthful
+        // render on screen. No per-minute interrupted ticks: standing on
+        // interrupted output is what muddied the panel.
         Event soon;
         if (panelMaintenanceDue(ms) &&
             !calendarManager().nextAlarm(now + MAINTENANCE_ALARM_GUARD_S, soon)) {
           display.requestCompleteWaveformNextRefresh();
           lastCompleteWaveformMs = ms;
           webUi().notePanelMaintenance();
-          drawIdleScreen(true);  // complete waveform (~15 s)
-          // Interrupted passes converge the panel onto one uniform baseline:
-          // the first pass leaves a band at the gate-scan cutoff seam, and
-          // repeated passes wash it out (observed: ~3 passes on the bench).
-          for (int pass = 0; pass < 3; ++pass) drawIdleScreen(true);
-        } else {
-          drawIdleScreen(full);
+          drawIdleScreen(true);  // complete waveform (~15 s), stands until next pass
         }
+#else
+        // Minute tick keeps the clock + countdowns fresh; occasionally deep-clean.
+        ++fastRefreshCount;
+        drawIdleScreen(fastRefreshCount % FULL_REFRESH_EVERY == 0);
+#endif
       }
       break;
     }
@@ -758,20 +777,19 @@ void loop() {
       struct tm tmv;
       localtime_r(&now, &tmv);
       if (tmv.tm_min != lastDrawnMinute && now > 1600000000) {
-        ++fastRefreshCount;
-        const bool full = fastRefreshCount % FULL_REFRESH_EVERY == 0;
-        // Hourly DC-balance pass (no alarm guard needed — nothing rings
-        // here). Same complete-then-interrupted pair as idle, so the parked
-        // screen stays on one uniform background.
+#if FREEINK_DEVICE_M5
+        // Same standing-image strategy as idle (no alarm guard — nothing
+        // rings here): a complete pass every 15 minutes, nothing in between.
         if (panelMaintenanceDue(ms)) {
           display.requestCompleteWaveformNextRefresh();
           lastCompleteWaveformMs = ms;
           webUi().notePanelMaintenance();
           drawHibernateScreen(true);  // complete waveform (~15 s)
-          for (int pass = 0; pass < 3; ++pass) drawHibernateScreen(true);  // settle the seam
-        } else {
-          drawHibernateScreen(full);
         }
+#else
+        ++fastRefreshCount;
+        drawHibernateScreen(fastRefreshCount % FULL_REFRESH_EVERY == 0);
+#endif
       }
       break;
     }
