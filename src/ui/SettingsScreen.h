@@ -54,6 +54,13 @@ class SettingsScreen {
   void toggleWorkDay(int day);
   void persist(int16_t item);
 
+  // GPIO focus helpers (buttons-only boards). The PAUSE/REBOOT dialogs draw
+  // OVER the normal view, whose controls stay registered — so dialog focus
+  // must be scoped to the dialog's own options instead of the router's
+  // whole-table moveFocus.
+  void focusFirst(freeink::ui::ActionId action);
+  void moveFocusWithin(freeink::ui::ActionId action, int dir);
+
   EInkDisplay& display_;
   FrontlightManager& frontlight_;
   freeink::ui::InteractionBuffer<48> interactions_;

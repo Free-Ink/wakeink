@@ -278,13 +278,17 @@ void Screen::drawIdle(const std::vector<Event>& events, const SyncStatus& sync, 
   // Settings cog (FreeInkUI button with an icon; white background so the
   // default button box doesn't draw a frame around it). Edge/corner reach is
   // SDK-handled: ensureMinTouchRect snaps near-edge hit rects to the bezel.
-  // Touchless boards (M5 PaperColor) configure on the web dashboard instead,
-  // so the cog would be an unreachable dead end — skip it.
-  if (BoardConfig::hasTouch()) {
+  // On touchless boards (M5 PaperColor) the cog is reached by GPIO focus:
+  // up/down cycle events then the cog; confirm opens settings. The focused
+  // style outlines it as the selection cue.
+  {
     ui::ButtonProps cog;
     cog.icon = ui::BitmapRef{CogIconBits, CogIconW, CogIconH, ui::BitmapFormat::BW1, true};
     cog.action = TAP_SETTINGS;
     cog.styles.normal.background = ui::Paint::solid(ui::Color::White);
+    cog.styles.focused.background = ui::Paint::solid(ui::Color::White);
+    cog.styles.focused.border = ui::Paint::solid(ui::Color::Black);
+    cog.styles.focused.borderWidth = 2;
     ui::button(c.frame, ui::Rect{W - 32, H - 28, 26, 26}, cog);
   }
 

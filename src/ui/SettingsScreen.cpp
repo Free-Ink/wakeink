@@ -151,6 +151,11 @@ ui::StyleSet ghostButton() {
   st.normal.borderWidth = 1;
   st.selected.background = ui::Paint::solid(ui::Color::Black);
   st.selected.foreground = ui::Paint::solid(ui::Color::White);
+  // GPIO focus cue (buttons-only boards): heavy outline, label untouched —
+  // a dither background reads as speckle on the 1-bit panel.
+  st.focused.background = ui::Paint::solid(ui::Color::White);
+  st.focused.border = ui::Paint::solid(ui::Color::Black);
+  st.focused.borderWidth = 3;
   // Disabled: keep the box visible, mute the label (dither renders as
   // speckled "grey" text on the 1-bit panel).
   st.disabled.background = ui::Paint::solid(ui::Color::White);
@@ -166,6 +171,8 @@ ui::StyleSet onHeaderButton() {  // white-outline button on the black header
   st.normal.border = ui::Paint::solid(ui::Color::White);
   st.normal.borderWidth = 1;
   st.normal.foreground = ui::Paint::solid(ui::Color::White);
+  st.focused = st.normal;
+  st.focused.borderWidth = 3;  // GPIO focus cue
   return st;
 }
 
@@ -566,12 +573,18 @@ void SettingsScreen::drawTzPicker(SettingsCanvas& c) {
 }
 
 void SettingsScreen::overlayPause(SettingsCanvas& c) {
+  // The active pause choice renders checked (solid), like the web dashboard's
+  // segmented control, so the current state is visible before picking.
+  const bool paused = stateStore().isPaused(time(nullptr));
+  auto mark = [&](int v) {
+    return (paused && stateStore().pauseChoiceMinutes == v) ? ui::StateChecked : ui::StateNormal;
+  };
   const ui::DialogOption options[] = {
-      {"Resume", A_DLG, 0, ui::StateNormal, stateStore().isPaused(time(nullptr))},
-      {"30 minutes", A_DLG, 30},
-      {"1 hour", A_DLG, 60},
-      {"4 hours", A_DLG, 240},
-      {"Until resumed", A_DLG, -1},
+      {paused ? "Resume" : "Active", A_DLG, 0, ui::StateNormal, paused},
+      {"30 minutes", A_DLG, 30, mark(30)},
+      {"1 hour", A_DLG, 60, mark(60)},
+      {"4 hours", A_DLG, 240, mark(240)},
+      {"Until resumed", A_DLG, -1, mark(-1)},
   };
   ui::OptionDialogProps d;
   d.title = "Pause alarms";
@@ -579,6 +592,7 @@ void SettingsScreen::overlayPause(SettingsCanvas& c) {
   d.optionCount = 5;
   d.titleText = txt(FONT_SMALL_B);
   d.buttonText = txt(FONT_SMALL_B, ui::Color::Black, ui::TextAlign::Center);
+  d.buttonStyles = ghostButton();  // visible GPIO focus + checked fill
   ui::StyleSet panel;
   panel.normal.background = ui::Paint::solid(ui::Color::White);
   panel.normal.border = ui::Paint::solid(ui::Color::Black);
@@ -606,6 +620,7 @@ void SettingsScreen::overlayReboot(SettingsCanvas& c) {
   d.optionCount = 2;
   d.titleText = txt(FONT_SMALL_B);
   d.buttonText = txt(FONT_SMALL_B, ui::Color::Black, ui::TextAlign::Center);
+  d.buttonStyles = ghostButton();  // visible GPIO focus outline
   ui::StyleSet panel;
   panel.normal.background = ui::Paint::solid(ui::Color::White);
   panel.normal.border = ui::Paint::solid(ui::Color::Black);
@@ -700,7 +715,50 @@ void SettingsScreen::persist(int16_t item) {
   if (item == IT_LOOKAHEAD) calendarManager().requestSync();
 }
 
+void SettingsScreen::focusFirst(ui::ActionId action) {
+  const ui::Interaction* data = interactions_.data();
+  for (int16_t i = 0; i < (int16_t)interactions_.count(); ++i) {
+    if (data[i].action == action && !ui::hasState(data[i].state, ui::StateDisabled)) {
+      interactions_.setFocusedIndex(i);
+      return;
+    }
+  }
+  interactions_.setFocusedIndex(-1);
+}
+
+void SettingsScreen::moveFocusWithin(ui::ActionId action, int dir) {
+  const ui::Interaction* data = interactions_.data();
+  const int n = (int)interactions_.count();
+  int16_t idxs[16];
+  int m = 0;
+  for (int16_t i = 0; i < n && m < 16; ++i) {
+    if (data[i].action == action && !ui::hasState(data[i].state, ui::StateDisabled)) idxs[m++] = i;
+  }
+  if (m == 0) return;
+  int pos = -1;
+  for (int k = 0; k < m; ++k) {
+    if (idxs[k] == interactions_.focusedIndex()) pos = k;
+  }
+  pos = pos < 0 ? (dir > 0 ? 0 : m - 1) : (pos + dir + m) % m;
+  interactions_.setFocusedIndex(idxs[pos]);
+}
+
 SettingsScreen::Result SettingsScreen::handleInput(const ui::InputSnapshot& snap) {
+  // GPIO focus moves (buttons-only boards). The PAUSE/REBOOT dialogs overlay
+  // the normal view, whose controls are still registered — scope their focus
+  // to the dialog options so up/down can't land behind the dialog. Everywhere
+  // else (tabbed view, full-screen TZ picker) the router's own focus walk is
+  // correct. Redraw FAST to show the moved outline.
+  if ((snap.focusNext || snap.focusPrev) && !snap.confirm && !snap.back && !snap.touchReleased) {
+    if (modal_ == Modal::PAUSE || modal_ == Modal::REBOOT) {
+      moveFocusWithin(A_DLG, snap.focusNext ? 1 : -1);
+    } else {
+      interactions_.route(snap);
+    }
+    draw(EInkDisplay::FAST_REFRESH);
+    return Result::NONE;
+  }
+
   const ui::ActionEvent ev = interactions_.route(snap);
   Serial.printf("[settings] route action=%u value=%d tap=(%d,%d) tab=%d page=%d modal=%d\n",
                 (unsigned)ev.action, (int)ev.value, (int)snap.touchX, (int)snap.touchY, tab_,
@@ -745,8 +803,14 @@ SettingsScreen::Result SettingsScreen::handleInput(const ui::InputSnapshot& snap
       stateStore().pauseChoiceMinutes = ev.value;
       stateStore().save();
       calendarManager().unlockConfig();
+    } else if (!snap.touchReleased && !snap.back) {
+      // GPIO confirm with nothing focused (or other non-input): keep the
+      // dialog open. Only a chosen option, an outside tap, or Back closes.
+      draw(EInkDisplay::FAST_REFRESH);
+      return Result::NONE;
     }
-    modal_ = Modal::NONE;  // any tap (option or outside) closes the dialog
+    modal_ = Modal::NONE;
+    interactions_.setFocusedIndex(-1);  // drop dialog-scoped focus
     draw(EInkDisplay::HALF_REFRESH);
     return Result::NONE;
   }
@@ -757,7 +821,12 @@ SettingsScreen::Result SettingsScreen::handleInput(const ui::InputSnapshot& snap
       delay(100);
       ESP.restart();
     }
+    if (ev.action != A_DLG && !snap.touchReleased && !snap.back) {
+      draw(EInkDisplay::FAST_REFRESH);
+      return Result::NONE;  // see PAUSE: GPIO no-ops keep the dialog open
+    }
     modal_ = Modal::NONE;
+    interactions_.setFocusedIndex(-1);
     draw(EInkDisplay::HALF_REFRESH);
     return Result::NONE;
   }
@@ -811,5 +880,13 @@ SettingsScreen::Result SettingsScreen::handleInput(const ui::InputSnapshot& snap
   }
 
   draw(structural ? EInkDisplay::HALF_REFRESH : EInkDisplay::FAST_REFRESH);
+  // A dialog just opened on a buttons-only board: land GPIO focus on its first
+  // option so confirm works immediately (the draw above registered the dialog's
+  // interactions; one more FAST pass renders the focus outline).
+  if (!BoardConfig::hasTouch() && structural &&
+      (modal_ == Modal::PAUSE || modal_ == Modal::REBOOT)) {
+    focusFirst(A_DLG);
+    draw(EInkDisplay::FAST_REFRESH);
+  }
   return Result::NONE;
 }

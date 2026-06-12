@@ -72,6 +72,25 @@ constexpr uint32_t CHORD_COOLDOWN_MS = 600;
 uint32_t lastFocusInputMs = 0;
 constexpr uint32_t FOCUS_TIMEOUT_MS = 30000;
 
+// The PaperColor mounts flipped 180° (Screen::show rotates the frame so the
+// buttons sit along the top edge), which reverses the physical up/down order
+// relative to the screen. The flip is an app choice, so its key-order
+// consequence is handled here too — the SDK profile keeps the board's native
+// pin mapping.
+#if FREEINK_DEVICE_M5
+constexpr uint8_t KEY_UP = InputManager::BTN_DOWN;
+constexpr uint8_t KEY_DOWN = InputManager::BTN_UP;
+#else
+constexpr uint8_t KEY_UP = InputManager::BTN_UP;
+constexpr uint8_t KEY_DOWN = InputManager::BTN_DOWN;
+#endif
+ui::ButtonBindings keyBindings() {
+  ui::ButtonBindings b;
+  b.focusPrev = KEY_UP;
+  b.focusNext = KEY_DOWN;
+  return b;
+}
+
 // Idle key actions are suppressed until this time — set when an alarm is
 // dismissed so the dismissing key's release can't double as an idle action.
 uint32_t keyQuietUntilMs = 0;
@@ -405,7 +424,7 @@ void loop() {
   // One snapshot per loop: physical buttons + a touch tap already mapped to
   // logical coordinates by the SDK's orientation-aware transform.
   const ui::InputSnapshot snap =
-      ui::snapshotFrom(input, screen->deviceContext(), TOUCH_FLIP_X, TOUCH_FLIP_Y);
+      ui::snapshotFrom(input, screen->deviceContext(), TOUCH_FLIP_X, TOUCH_FLIP_Y, keyBindings());
   const bool gotTap = snap.touchReleased;
   // Any input dismisses an alarm (touch tap or a physical key).
   const bool anyInput = gotTap || input.wasAnyPressed();
@@ -540,8 +559,8 @@ void loop() {
             enterHibernate();
             break;
           }
-          if (input.wasReleased(InputManager::BTN_UP) ||
-              input.wasReleased(InputManager::BTN_DOWN)) {
+          if (input.wasReleased(KEY_UP) ||
+              input.wasReleased(KEY_DOWN)) {
             // Move the selection (release-edge, so a chord can't half-fire).
             // With no selection yet, the first press starts one at the top.
             lastFocusInputMs = ms;
@@ -549,8 +568,8 @@ void loop() {
               screen->focusAction(Screen::TAP_EVENT);
             } else {
               ui::InputSnapshot nav{};
-              nav.focusPrev = input.wasReleased(InputManager::BTN_UP);
-              nav.focusNext = input.wasReleased(InputManager::BTN_DOWN);
+              nav.focusPrev = input.wasReleased(KEY_UP);
+              nav.focusNext = input.wasReleased(KEY_DOWN);
               screen->route(nav);
             }
             drawIdleScreen(false);
@@ -576,6 +595,10 @@ void loop() {
                 screen->drawEventPopup(popupEvent, now);
                 screen->show(true);
               }
+            } else if (r.action == Screen::TAP_SETTINGS) {
+              uiState = UiState::SETTINGS;
+              settingsLastInputMs = ms;
+              settingsScreen->open();
             }
             break;
           }
@@ -652,7 +675,22 @@ void loop() {
       // Keep info rows (last sync, pause countdown) fresh when a sync lands.
       if (calendarManager().consumeDirtyFlag()) settingsScreen->redraw();
 
-      if (gotTap || snap.back) {
+      // Buttons-only boards: up/down releases walk the GPIO focus through the
+      // controls (SettingsScreen redraws to show the outline); a short confirm
+      // press activates the focused control; hold (Back) closes/cancels.
+      if (!BoardConfig::hasTouch() &&
+          (input.wasReleased(KEY_UP) ||
+           input.wasReleased(KEY_DOWN)) &&
+          ms - lastChordMs > CHORD_COOLDOWN_MS) {
+        settingsLastInputMs = ms;
+        ui::InputSnapshot nav{};
+        nav.focusPrev = input.wasReleased(KEY_UP);
+        nav.focusNext = input.wasReleased(KEY_DOWN);
+        settingsScreen->handleInput(nav);
+        break;
+      }
+
+      if (gotTap || snap.back || snap.confirm) {
         settingsLastInputMs = ms;
         const SettingsScreen::Result r = settingsScreen->handleInput(snap);
         if (r == SettingsScreen::Result::CLOSED) {
@@ -676,11 +714,11 @@ void loop() {
       // Buttons-only boards: up/down move the dialog's GPIO focus between
       // Cancel and Skip (redrawn to show the outline), confirm activates it.
       if (!BoardConfig::hasTouch() &&
-          (input.wasReleased(InputManager::BTN_UP) ||
-           input.wasReleased(InputManager::BTN_DOWN))) {
+          (input.wasReleased(KEY_UP) ||
+           input.wasReleased(KEY_DOWN))) {
         ui::InputSnapshot nav{};
-        nav.focusPrev = input.wasReleased(InputManager::BTN_UP);
-        nav.focusNext = input.wasReleased(InputManager::BTN_DOWN);
+        nav.focusPrev = input.wasReleased(KEY_UP);
+        nav.focusNext = input.wasReleased(KEY_DOWN);
         screen->route(nav);
         screen->drawEventPopup(popupEvent, now);
         screen->show(false);
