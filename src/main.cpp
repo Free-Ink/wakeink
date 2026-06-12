@@ -301,9 +301,6 @@ void startAlarm(const Event& ev) {
 void stopAlarm(bool fired) {
   alarmsound::stop();
   if (fired) calendarManager().markFired(ringingEvent);
-  // The dismissing key's release lands after we're back in IDLE — keep it
-  // from triggering the idle key actions (notably hibernate on Murphy's UP).
-  keyQuietUntilMs = millis() + 600;
   // The post-alarm idle frame becomes the standing image (the alarm screen
   // was strobing interrupted frames over it), so render it with the complete
   // waveform and restart the 15-minute clock. No-op on Murphy.
@@ -311,6 +308,13 @@ void stopAlarm(bool fired) {
   lastCompleteWaveformMs = millis();
   webUi().notePanelMaintenance();
   enterIdle();
+  // The dismissing key's release lands after we're back in IDLE — keep it
+  // from triggering idle key actions (a focus step on the PaperColor would
+  // immediately overdraw the fresh complete render; hibernate on Murphy's
+  // UP). Set AFTER enterIdle(): its complete waveform blocks ~15 s, and the
+  // release edge is only observed on the first input poll after that, so a
+  // pre-draw window would have expired before it could suppress anything.
+  keyQuietUntilMs = millis() + 600;
   // Clear the LEDs AFTER enterIdle()'s full panel refresh — clearing first
   // left them vulnerable to a rail-sag re-POR during the refresh, which is
   // how a stuck (typically green) LED survived dismissal.
