@@ -33,6 +33,15 @@ class WebUi {
   // this continuously).
   uint32_t lastRequestMs() const { return lastRequestMs_; }
 
+  // Bench knob (M5 PaperColor): pending interrupted-refresh cutoff request
+  // from POST /api/display-cutoff, 0 = none. Main loop applies it to the
+  // display driver and redraws so the band position can be swept live.
+  uint16_t consumeCutoffRequest() {
+    const uint16_t v = cutoffRequested_;
+    cutoffRequested_ = 0;
+    return v;
+  }
+
  private:
   void handleRoot();
   void handleStatus();
@@ -65,6 +74,8 @@ class WebUi {
   volatile bool displayRefreshRequested_ = false;
   volatile uint32_t lastPanelMaintenanceMs_ = 0;
   volatile uint32_t lastRequestMs_ = 0;
+  volatile uint16_t cutoffRequested_ = 0;
+  void handleDisplayCutoff();
 
   // Alarm-sound upload state (multipart streaming to a temp file).
   fs::File uploadFile_;

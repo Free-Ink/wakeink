@@ -476,6 +476,14 @@ void loop() {
       // insta-dismiss the next alarm.
       webUi().consumeDismiss();
 
+      // Bench knob: live retune of the interrupted-refresh cutoff, redrawn
+      // immediately so the band position is visible at the new value.
+      if (const uint16_t cutoffMs = webUi().consumeCutoffRequest()) {
+        display.setFastRefreshCutoffMs(cutoffMs);
+        drawIdleScreen(true);
+        break;
+      }
+
       // Alarm trigger check.
       Event candidate;
       if (calendarManager().nextAlarm(now, candidate)) {
@@ -528,7 +536,7 @@ void loop() {
             webUi().notePanelMaintenance();
             calendarManager().requestSync();
             drawIdleScreen(true);  // complete waveform (~15 s)
-            drawIdleScreen(true);  // uniform interrupted baseline
+            for (int pass = 0; pass < 3; ++pass) drawIdleScreen(true);  // settle the seam
             break;
           }
           calendarManager().requestSync();
@@ -586,7 +594,10 @@ void loop() {
           lastCompleteWaveformMs = ms;
           webUi().notePanelMaintenance();
           drawIdleScreen(true);  // complete waveform (~15 s)
-          drawIdleScreen(true);  // uniform interrupted baseline
+          // Interrupted passes converge the panel onto one uniform baseline:
+          // the first pass leaves a band at the gate-scan cutoff seam, and
+          // repeated passes wash it out (observed: ~3 passes on the bench).
+          for (int pass = 0; pass < 3; ++pass) drawIdleScreen(true);
         } else {
           drawIdleScreen(full);
         }
@@ -665,7 +676,7 @@ void loop() {
           lastCompleteWaveformMs = ms;
           webUi().notePanelMaintenance();
           drawHibernateScreen(true);  // complete waveform (~15 s)
-          drawHibernateScreen(true);  // uniform interrupted baseline
+          for (int pass = 0; pass < 3; ++pass) drawHibernateScreen(true);  // settle the seam
         } else {
           drawHibernateScreen(full);
         }

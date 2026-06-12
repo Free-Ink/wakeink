@@ -46,6 +46,7 @@ void WebUi::begin() {
   server_->on("/api/dismiss", HTTP_POST, [this] { handleAction(dismissRequested_); });
   server_->on("/api/test-alarm", HTTP_POST, [this] { handleAction(testAlarmRequested_); });
   server_->on("/api/reboot", HTTP_POST, [this] { handleReboot(); });
+  server_->on("/api/display-cutoff", HTTP_POST, [this] { handleDisplayCutoff(); });
   server_->onNotFound([this] { handleNotFound(); });
 
   server_->begin();
@@ -69,6 +70,23 @@ void WebUi::handleNotFound() {
     return;
   }
   server_->send(404, "text/plain", "Not found");
+}
+
+// Bench knob: POST /api/display-cutoff {"ms": 340} retunes the M5 PaperColor's
+// interrupted-refresh cutoff live (not persisted; resets to the firmware
+// default on reboot). The next redraw shows the band at the new scan position.
+void WebUi::handleDisplayCutoff() {
+  JsonDocument body;
+  if (!parseBody(body)) return;
+  const int ms = body["ms"] | 0;
+  if (ms < 100 || ms > 2000) {
+    server_->send(400, "text/plain", "ms must be 100-2000");
+    return;
+  }
+  cutoffRequested_ = (uint16_t)ms;
+  JsonDocument doc;
+  doc["ms"] = ms;
+  sendJson(doc);
 }
 
 void WebUi::sendJson(const JsonDocument& doc) {
