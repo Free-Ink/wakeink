@@ -304,6 +304,12 @@ void stopAlarm(bool fired) {
   // The dismissing key's release lands after we're back in IDLE — keep it
   // from triggering the idle key actions (notably hibernate on Murphy's UP).
   keyQuietUntilMs = millis() + 600;
+  // The post-alarm idle frame becomes the standing image (the alarm screen
+  // was strobing interrupted frames over it), so render it with the complete
+  // waveform and restart the 15-minute clock. No-op on Murphy.
+  display.requestCompleteWaveformNextRefresh();
+  lastCompleteWaveformMs = millis();
+  webUi().notePanelMaintenance();
   enterIdle();
   // Clear the LEDs AFTER enterIdle()'s full panel refresh — clearing first
   // left them vulnerable to a rail-sag re-POR during the refresh, which is
