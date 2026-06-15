@@ -663,7 +663,11 @@ void loop() {
         }
         drawIdleScreen(true);
 #else
-        drawIdleScreen(false);
+        // A content swap (e.g. "No upcoming events" -> a populated calendar) is a
+        // full-screen change. The manufacturer's DU/fast waveform is a light
+        // partial-update drive and can't clear a change this large, so it must
+        // use the full (GC) waveform or it ghosts badly.
+        drawIdleScreen(true);
 #endif
         break;
       }
