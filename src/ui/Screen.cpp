@@ -5,7 +5,7 @@
 #include <qrcode.h>
 
 #include "../config/AppSettings.h"
-#include "CogIcon.h"
+#include "Icons.h"
 #include "GfxTextDrawTarget.h"
 #include "ScreenGeometry.h"
 
@@ -36,7 +36,14 @@ ui::DeviceContext makeDevice() {
                            ui::Orientation::LandscapeCounterClockwise,
                            BoardConfig::hasTouch(),
                            true,
-                           {},
+                           // Safe area: the full-bleed header/banner owns the top
+                           // edge on every screen, so top inset is 0; body content
+                           // keeps a uniform MARGIN on the other three edges. Lay
+                           // out against device.safeRect() and the edges stay
+                           // consistent instead of being re-derived per draw call.
+                           ui::Insets{0, MARGIN, MARGIN, MARGIN},
+                           // minTouchSize stays 0: hit bands are sized explicitly
+                           // per control (ButtonProps.hitPadding), not auto-grown.
                            0};
 }
 
@@ -205,17 +212,18 @@ void Screen::drawIdle(const std::vector<Event>& events, const SyncStatus& sync, 
   ui::DrawTarget& t = c.target;
   const bool use24 = settings().use24HourTime;
 
-  // Page skeleton on the FreeInkUI grid: header band / content / footer. The
-  // bands are per-device metrics + line heights, so the same code fills any
-  // panel the build targets.
+  // Page skeleton on the FreeInkUI grid, laid out inside the safe area: a
+  // reserved header band (the status bar itself draws full-bleed below),
+  // flexible content, and a footer band. safeRect() carries the left/right/
+  // bottom margins, so every band inherits them — no per-draw MARGIN math.
   const int16_t footerH = (int16_t)(lh(t, FONT_SMALL_B) + lh(t, FONT_TINY) + 2);
-  ui::Stack<3> grid(c.device.screen(), ui::Axis::Column, 0);
+  ui::Stack<3> grid(c.device.safeRect(), ui::Axis::Column, 0);
   grid.fixed(HEADER_H);
   grid.flex(1);
   grid.fixed(footerH);
   grid.layout();
   const ui::Rect content = grid.rect(1);
-  const int16_t footerY = grid.rect(2).y;
+  const ui::Rect footer = grid.rect(2);
 
   // --- header: FreeInkUI status bar (inverted), date left / clock right -------
   const String dateStr = formatDate(now);
@@ -237,22 +245,22 @@ void Screen::drawIdle(const std::vector<Event>& events, const SyncStatus& sync, 
   sb.leading = dateStr.c_str();
   sb.trailing = clockStr.c_str();
   if (!badge.isEmpty()) sb.title = badge.c_str();
-  ui::statusBar(c.frame, grid.rect(0), sb);
+  ui::statusBar(c.frame, ui::Rect{0, 0, W, HEADER_H}, sb);  // full-bleed across the top
 
   // --- footer: wakeink.local + IP, with the settings cog at bottom-right ------
-  const int16_t footerW = W - 2 * MARGIN - 40;  // keep clear of the cog
+  const int16_t footerW = (int16_t)(footer.width - 40);  // keep clear of the cog
   String footerDetail;
   if (wifiUp) {
-    ui::drawText(t, ui::Rect{MARGIN, footerY, footerW, lh(t, FONT_SMALL_B)},
+    ui::drawText(t, ui::Rect{footer.x, footer.y, footerW, lh(t, FONT_SMALL_B)},
                  ("http://" + hostname + ".local").c_str(), style(FONT_SMALL_B));
     footerDetail = ip;
     if (sync.lastSyncTime) footerDetail += "  ·  synced " + formatClock(sync.lastSyncTime, use24);
     ui::drawText(t,
-                 ui::Rect{MARGIN, (int16_t)(footerY + lh(t, FONT_SMALL_B) - 1), footerW,
+                 ui::Rect{footer.x, (int16_t)(footer.y + lh(t, FONT_SMALL_B) - 1), footerW,
                           lh(t, FONT_TINY)},
                  footerDetail.c_str(), style(FONT_TINY));
   } else {
-    ui::drawText(t, ui::Rect{MARGIN, footerY, footerW, lh(t, FONT_SMALL_B)},
+    ui::drawText(t, ui::Rect{footer.x, footer.y, footerW, lh(t, FONT_SMALL_B)},
                  "WiFi disconnected", style(FONT_SMALL_B));
   }
 
@@ -264,24 +272,27 @@ void Screen::drawIdle(const std::vector<Event>& events, const SyncStatus& sync, 
   // style outlines it as the selection cue.
   {
     ui::ButtonProps cog;
-    cog.icon = ui::BitmapRef{CogIconBits, CogIconW, CogIconH, ui::BitmapFormat::BW1, true};
+    // SDK Lucide "settings" icon (freeink::Icon, Mask1: bit 0 = draw).
+    cog.icon = ui::BitmapRef{icon_settings_24.bits, icon_settings_24.w, icon_settings_24.h,
+                             ui::BitmapFormat::Mask1, false};
     cog.action = TAP_SETTINGS;
     cog.styles.normal.background = ui::Paint::solid(ui::Color::White);
     cog.styles.focused.background = ui::Paint::solid(ui::Color::White);
     cog.styles.focused.border = ui::Paint::solid(ui::Color::Black);
     cog.styles.focused.borderWidth = 2;
-    ui::button(c.frame, ui::Rect{W - 32, H - 28, 26, 26}, cog);
+    ui::button(c.frame,
+               ui::Rect{(int16_t)(footer.right() - 26), (int16_t)(footer.bottom() - 26), 26, 26}, cog);
   }
 
   if (events.empty()) {
     // Centered in the content slot, nudged up a third for visual balance.
     const int16_t emptyY = (int16_t)(content.y + content.height / 3);
-    ui::drawText(t, ui::Rect{0, emptyY, W, lh(t, FONT_BODY)}, "No upcoming events",
+    ui::drawText(t, ui::Rect{content.x, emptyY, content.width, lh(t, FONT_BODY)}, "No upcoming events",
                  style(FONT_BODY, ui::Color::Black, ui::TextAlign::Center));
     if (sync.calendarsTotal == 0) {
       const String hint = "Add calendars at http://" + (wifiUp ? ip : String("192.168.4.1"));
       ui::drawText(t,
-                   ui::Rect{MARGIN, (int16_t)(emptyY + lh(t, FONT_BODY) + 10), W - 2 * MARGIN,
+                   ui::Rect{content.x, (int16_t)(emptyY + lh(t, FONT_BODY) + 10), content.width,
                             lh(t, FONT_SMALL)},
                    hint.c_str(), style(FONT_SMALL, ui::Color::Black, ui::TextAlign::Center));
     }
@@ -292,10 +303,11 @@ void Screen::drawIdle(const std::vector<Event>& events, const SyncStatus& sync, 
   const Event& next = events.front();
   const bool nextIsToday = (now >= next.start && now < next.end) || daysAhead(next.start, now) <= 0;
   int16_t y = (int16_t)(content.y + MARGIN - 1);
-  const int16_t contentW = W - 2 * MARGIN;
+  const int16_t contentX = content.x;
+  const int16_t contentW = content.width;
 
   if (!nextIsToday) {
-    ui::drawText(t, ui::Rect{MARGIN, y, contentW, lh(t, FONT_SMALL_B)}, "No more events today",
+    ui::drawText(t, ui::Rect{contentX, y, contentW, lh(t, FONT_SMALL_B)}, "No more events today",
                  style(FONT_SMALL_B));
     y += lh(t, FONT_SMALL_B) + 4;
   }
@@ -305,7 +317,7 @@ void Screen::drawIdle(const std::vector<Event>& events, const SyncStatus& sync, 
   const int16_t cardTop = y;
   const ui::TextStyle titleStyle = style(FONT_TITLE, ui::Color::Black, ui::TextAlign::Left, 2);
   const int16_t titleH = ui::measureWrappedText(t, next.title.c_str(), titleStyle, contentW).height;
-  ui::drawText(t, ui::Rect{MARGIN, y, contentW, titleH}, next.title.c_str(), titleStyle);
+  ui::drawText(t, ui::Rect{contentX, y, contentW, titleH}, next.title.c_str(), titleStyle);
   y += titleH + 2;
 
   // Time row: time left, countdown right (same rect, opposite alignment).
@@ -313,7 +325,7 @@ void Screen::drawIdle(const std::vector<Event>& events, const SyncStatus& sync, 
   const String day = nextIsToday ? String() : dayLabel(next.start, now);
   if (!day.isEmpty()) when = day + "  ·  " + when;
   const String count = countdownLabel(now, next);
-  const ui::Rect timeRow{MARGIN, y, contentW, lh(t, FONT_BODY)};
+  const ui::Rect timeRow{contentX, y, contentW, lh(t, FONT_BODY)};
   ui::drawText(t, timeRow, when.c_str(), style(FONT_BODY));
   ui::drawText(t, timeRow, count.c_str(), style(FONT_BODY_B, ui::Color::Black, ui::TextAlign::Right));
   y += lh(t, FONT_BODY) + 5;
@@ -326,7 +338,7 @@ void Screen::drawIdle(const std::vector<Event>& events, const SyncStatus& sync, 
              ui::Paint::solid(ui::Color::Black), 2, 0, ui::CornersAll);
   }
 
-  t.line(ui::Point{MARGIN, y}, ui::Point{(int16_t)(W - MARGIN), y}, 1,
+  t.line(ui::Point{contentX, y}, ui::Point{(int16_t)(contentX + contentW), y}, 1,
          ui::Paint::solid(ui::Color::Black));
   y += 6;
 
@@ -334,7 +346,7 @@ void Screen::drawIdle(const std::vector<Event>& events, const SyncStatus& sync, 
   const int16_t rowH = lh(t, FONT_SMALL) + 4;
   const int16_t timeColW = wakeink::UI_TIME_COL_W;
   for (size_t i = 1; i < events.size(); ++i) {
-    if (y + rowH > footerY - 4) break;
+    if (y + rowH > footer.y - 4) break;
     const Event& ev = events[i];
     // Register the hit before drawing so stateFor() can see this row's focus
     // (the same order FreeInkUI components use); a GPIO-focused row renders
@@ -343,10 +355,10 @@ void Screen::drawIdle(const std::vector<Event>& events, const SyncStatus& sync, 
     const bool focused = ui::hasState(c.frame.stateFor(TAP_EVENT, (int16_t)i), ui::StateFocused);
     if (focused) t.fill(ui::Rect{0, y, W, rowH}, ui::Paint::solid(ui::Color::Black), 0, ui::CornersAll);
     const ui::Color ink = focused ? ui::Color::White : ui::Color::Black;
-    ui::drawText(t, ui::Rect{MARGIN, y, timeColW, rowH}, listTimeLabel(ev.start, now, use24).c_str(),
+    ui::drawText(t, ui::Rect{contentX, y, timeColW, rowH}, listTimeLabel(ev.start, now, use24).c_str(),
                  style(FONT_SMALL_B, ink));
     ui::drawText(t,
-                 ui::Rect{(int16_t)(MARGIN + timeColW + 6), y,
+                 ui::Rect{(int16_t)(contentX + timeColW + 6), y,
                           (int16_t)(contentW - timeColW - 6), rowH},
                  ev.title.c_str(), style(FONT_SMALL, ink));
     y += rowH;
@@ -437,15 +449,16 @@ void Screen::drawAlarm(const Event& ev, time_t now) {
   hp.titleText = style(FONT_BODY_B, ui::Color::White, ui::TextAlign::Center);
   ui::header(c.frame, ui::Rect{0, 0, W, BANNER_H}, hp);
 
+  const ui::Rect safe = c.device.safeRect();
   int16_t y = (int16_t)(BANNER_H + MARGIN + 4);
   const ui::TextStyle titleStyle = style(FONT_HUGE, ui::Color::Black, ui::TextAlign::Left, 3);
   const int16_t titleH =
-      ui::measureWrappedText(t, ev.title.c_str(), titleStyle, W - 2 * MARGIN).height;
-  ui::drawText(t, ui::Rect{MARGIN, y, W - 2 * MARGIN, titleH}, ev.title.c_str(), titleStyle);
+      ui::measureWrappedText(t, ev.title.c_str(), titleStyle, safe.width).height;
+  ui::drawText(t, ui::Rect{safe.x, y, safe.width, titleH}, ev.title.c_str(), titleStyle);
   y += titleH + 6;
 
   const String body = "Starts at " + formatClock(ev.start, use24);
-  ui::drawText(t, ui::Rect{MARGIN, y, W - 2 * MARGIN, lh(t, FONT_BODY)}, body.c_str(),
+  ui::drawText(t, ui::Rect{safe.x, y, safe.width, lh(t, FONT_BODY)}, body.c_str(),
                style(FONT_BODY));
 
   ui::HeaderProps foot;
@@ -469,20 +482,21 @@ void Screen::drawSetupPortal(const String& apSsid, const String& ip, const Strin
   hp.titleText = style(FONT_BODY_B, ui::Color::White);
   ui::header(c.frame, ui::Rect{0, 0, W, BANNER_H}, hp);
 
+  const ui::Rect safe = c.device.safeRect();
   // QR (right) joins the open AP in one scan (WIFI: URI format).
   constexpr int QR_SCALE = wakeink::UI_QR_SCALE;
   constexpr int QR_SIZE = 29 * QR_SCALE;  // version 3
-  const int16_t qrX = W - QR_SIZE - MARGIN - 8;
+  const int16_t qrX = (int16_t)(safe.right() - QR_SIZE - 8);
   const int16_t qrY = (int16_t)(BANNER_H + MARGIN + 10);
   const String wifiQr = "WIFI:T:nopass;S:" + apSsid + ";;";
   drawQr(t, wifiQr.c_str(), qrX, qrY, QR_SCALE);
   ui::drawText(t, ui::Rect{qrX, (int16_t)(qrY + QR_SIZE + 4), QR_SIZE, lh(t, FONT_TINY)},
                "Scan to join", style(FONT_TINY, ui::Color::Black, ui::TextAlign::Center));
 
-  const int16_t textW = qrX - MARGIN - 12;
+  const int16_t textW = (int16_t)(qrX - safe.x - 12);
   int16_t y = qrY;
   auto row = [&](ui::FontId f, const String& s, int extra = 0) {
-    ui::drawText(t, ui::Rect{MARGIN, y, textW, lh(t, f)}, s.c_str(), style(f));
+    ui::drawText(t, ui::Rect{safe.x, y, textW, lh(t, f)}, s.c_str(), style(f));
     y += lh(t, f) + extra;
   };
   row(FONT_BODY, "1. Join the WiFi network");
@@ -531,12 +545,13 @@ void Screen::drawMessage(const char* title, const char* line1, const char* line2
   hp.titleText = style(FONT_BODY_B, ui::Color::White);
   ui::header(c.frame, ui::Rect{0, 0, W, BANNER_H}, hp);
 
+  const ui::Rect safe = c.device.safeRect();
   int16_t y = (int16_t)(BANNER_H * 2);
   if (line1) {
-    ui::drawText(t, ui::Rect{MARGIN, y, W - 2 * MARGIN, lh(t, FONT_BODY)}, line1, style(FONT_BODY));
+    ui::drawText(t, ui::Rect{safe.x, y, safe.width, lh(t, FONT_BODY)}, line1, style(FONT_BODY));
     y += lh(t, FONT_BODY) + 6;
   }
   if (line2) {
-    ui::drawText(t, ui::Rect{MARGIN, y, W - 2 * MARGIN, lh(t, FONT_SMALL)}, line2, style(FONT_SMALL));
+    ui::drawText(t, ui::Rect{safe.x, y, safe.width, lh(t, FONT_SMALL)}, line2, style(FONT_SMALL));
   }
 }

@@ -1,0 +1,7 @@
+# WakeInk icon manifest — `alias = lucide-name`. Regenerate src/ui/Icons.h with:
+#   python3 vendor/freeink-sdk/libs/assets/Icons/tools/gen_icons.py \
+#       --manifest scripts/icons.txt \
+#       --svgdir vendor/freeink-sdk/libs/assets/Icons/lucide/icons \
+#       --sizes 24 --out src/ui/Icons.h
+# Needs rsvg-convert (librsvg) + Pillow. Icons are freeink::Icon (Mask1: 0=draw).
+settings = settings
