@@ -894,15 +894,15 @@ SettingsScreen::Result SettingsScreen::handleInput(const ui::InputSnapshot& snap
     return Result::NONE;
   }
 
-  // Normal (tabbed) view. Take the ghost-clearing HALF refresh when:
-  //  - structural: tab/page/dialog transitions repaint large regions.
-  //  - cleanRedraw: an in-place value/state change (stepper value, toggle, day
-  //    chip). The UC8253 FAST/DU waveform is low-contrast and can't reliably
-  //    render crisp text over a previous value — even with the driver's
-  //    differential shadow it leaves residual/faint glyphs. HALF (GC) fully
-  //    drives every pixel, so the new value reads clean every time.
+  // Normal (tabbed) view. Take the ghost-clearing HALF refresh only for
+  // structural changes (tab/page/dialog transitions repaint large regions and
+  // need a full drive or the previous layout's residue reads as trash).
+  // In-place value/state changes (stepper value, toggle, day chip) take the FAST
+  // differential refresh: with the facade double-buffered, the driver diffs the
+  // new frame against the previously displayed one and only drives the handful of
+  // changed pixels — flash-free, and the per-refresh controller reset keeps the
+  // new glyph crisp instead of ghosting over the old value.
   bool structural = false;
-  bool cleanRedraw = false;
   switch (ev.action) {
     case A_CLOSE:
       return Result::CLOSED;
@@ -917,19 +917,15 @@ SettingsScreen::Result SettingsScreen::handleInput(const ui::InputSnapshot& snap
       break;
     case A_TOGGLE:
       applyToggle(ev.value);
-      cleanRedraw = true;
       break;
     case A_DEC:
       applyStep(ev.value, -1);
-      cleanRedraw = true;
       break;
     case A_INC:
       applyStep(ev.value, +1);
-      cleanRedraw = true;
       break;
     case A_DAY:
       toggleWorkDay(ev.value);
-      cleanRedraw = true;
       break;
     case A_DO:
       switch (ev.value) {
@@ -952,7 +948,7 @@ SettingsScreen::Result SettingsScreen::handleInput(const ui::InputSnapshot& snap
       break;
   }
 
-  draw((structural || cleanRedraw) ? EInkDisplay::HALF_REFRESH : EInkDisplay::FAST_REFRESH);
+  draw(structural ? EInkDisplay::HALF_REFRESH : EInkDisplay::FAST_REFRESH);
   // A dialog just opened on a buttons-only board: land GPIO focus on its first
   // option so confirm works immediately (the draw above registered the dialog's
   // interactions; one more FAST pass renders the focus outline).
