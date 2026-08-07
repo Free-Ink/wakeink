@@ -29,22 +29,35 @@ constexpr int BANNER_H = wakeink::UI_BANNER_H;
 // Canonical panel context: per-device landscape framebuffer (ScreenGeometry.h).
 // Touch mapping and rendering both key off this. The orientation only feeds
 // touchToLogical, so it describes the touch panel's mounting — landscape CCW on
-// Murphy, the only touch device; it is unused on touchless boards.
+// Murphy (whose CHSC6x reports portrait-native coords); identity on the Paper
+// Mono, whose TouchConfig swap/flip already lands the FT6336 in the displayed
+// 800x480 frame; unused on touchless boards.
+#if FREEINK_DEVICE_PAPERMONO
+constexpr ui::Orientation TOUCH_ORIENTATION = ui::Orientation::Portrait;  // identity
+#else
+constexpr ui::Orientation TOUCH_ORIENTATION = ui::Orientation::LandscapeCounterClockwise;
+#endif
+
 ui::DeviceContext makeDevice() {
-  return ui::DeviceContext{W,
-                           H,
-                           ui::Orientation::LandscapeCounterClockwise,
-                           BoardConfig::hasTouch(),
-                           true,
-                           // Safe area: the full-bleed header/banner owns the top
-                           // edge on every screen, so top inset is 0; body content
-                           // keeps a uniform MARGIN on the other three edges. Lay
-                           // out against device.safeRect() and the edges stay
-                           // consistent instead of being re-derived per draw call.
-                           ui::Insets{0, MARGIN, MARGIN, MARGIN},
-                           // minTouchSize stays 0: hit bands are sized explicitly
-                           // per control (ButtonProps.hitPadding), not auto-grown.
-                           0};
+  return ui::DeviceContext{
+      .width = W,
+      .height = H,
+      // The app renders the landscape framebuffer natively (no rotation);
+      // nothing in the component layer reads this — the load-bearing field is
+      // touchOrientation below.
+      .orientation = ui::Orientation::LandscapeCounterClockwise,
+      .touchOrientation = TOUCH_ORIENTATION,
+      .hasTouch = BoardConfig::hasTouch(),
+      .hasButtons = true,
+      // Safe area: the full-bleed header/banner owns the top
+      // edge on every screen, so top inset is 0; body content
+      // keeps a uniform MARGIN on the other three edges. Lay
+      // out against device.safeRect() and the edges stay
+      // consistent instead of being re-derived per draw call.
+      .safeArea = ui::Insets{0, MARGIN, MARGIN, MARGIN},
+      // minTouchSize stays 0: hit bands are sized explicitly
+      // per control (ButtonProps.hitPadding), not auto-grown.
+      .minTouchSize = 0};
 }
 
 // A FreeInkUI render context bound to the device framebuffer. Each screen

@@ -17,15 +17,17 @@ namespace wakeink {
 // in light mode, black in dark mode. Shared here so the screens can't drift.
 inline uint8_t clearColor() { return settings().darkMode ? 0x00 : 0xFF; }
 
-// 180° mount flip (M5 PaperColor: buttons along the top edge), applied to the
-// finished frame just before each push. With byte-aligned rows, (x,y) ->
-// (W-1-x, H-1-y) is exactly "reverse the whole bit string": swap mirrored
-// bytes end-to-end, bit-reversing each. Shared here so every screen that
-// pushes the framebuffer (Screen::show, SettingsScreen::draw) flips
+// 180° mount flip (M5 PaperColor and Paper Mono: buttons along the top edge),
+// applied to the finished frame just before each push. With byte-aligned rows,
+// (x,y) -> (W-1-x, H-1-y) is exactly "reverse the whole bit string": swap
+// mirrored bytes end-to-end, bit-reversing each. Shared here so every screen
+// that pushes the framebuffer (Screen::show, SettingsScreen::draw) flips
 // identically — orientation is an app choice, so it lives app-side, not in
-// the SDK driver. No-op on other devices.
+// the SDK driver (the Paper Mono profile's ROTATE_180 stays what it is: the
+// panel's mount transform, on top of which this is the app's preference).
+// Touch follows via TOUCH_FLIP_X/Y in main.cpp. No-op on other devices.
 inline void flipFrameForMount(uint8_t* fb, uint32_t len) {
-#if FREEINK_DEVICE_M5
+#if FREEINK_DEVICE_M5 || FREEINK_DEVICE_PAPERMONO
   auto rev = [](uint8_t b) {
     b = (uint8_t)(((b & 0xF0) >> 4) | ((b & 0x0F) << 4));
     b = (uint8_t)(((b & 0xCC) >> 2) | ((b & 0x33) << 2));
@@ -67,6 +69,22 @@ constexpr int UI_HEADER_H = 30;
 constexpr int UI_BANNER_H = 42;
 constexpr int UI_FOOTER_BAND_H = 36;
 constexpr int UI_QR_SCALE = 6;
+constexpr int UI_DIALOG_BTN_H = 48;
+constexpr int UI_TIME_COL_W = 112;
+#elif FREEINK_DEVICE_PAPERMONO
+// 3.97" 800x480 (~235 PPI). Binds the M5's 1.4x font set for now, so the
+// chrome uses the M5's pixel metrics too — text runs physically smaller than
+// on the lower-PPI panels but the extra pixels fit more content. A dedicated
+// ~1.9x glyph set (gen_fonts.py) would restore the physical size; bump these
+// with it. QR modules get an extra step so phones can still lock on at this
+// pixel density.
+constexpr int SCREEN_W = 800;
+constexpr int SCREEN_H = 480;
+constexpr int UI_MARGIN = 12;
+constexpr int UI_HEADER_H = 30;
+constexpr int UI_BANNER_H = 42;
+constexpr int UI_FOOTER_BAND_H = 36;
+constexpr int UI_QR_SCALE = 8;
 constexpr int UI_DIALOG_BTN_H = 48;
 constexpr int UI_TIME_COL_W = 112;
 #else

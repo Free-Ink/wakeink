@@ -54,6 +54,7 @@ Event popupEvent;  // the event whose skip/cancel popup is showing
 uint32_t alarmStartedMs = 0;
 uint32_t lastFlashToggleMs = 0;
 bool flashOn = false;
+bool flashShown = false;  // last flash phase pushed to the lights (edge detect)
 
 int lastDrawnMinute = -1;
 uint32_t fastRefreshCount = 0;
@@ -72,12 +73,12 @@ constexpr uint32_t CHORD_COOLDOWN_MS = 600;
 uint32_t lastFocusInputMs = 0;
 constexpr uint32_t FOCUS_TIMEOUT_MS = 30000;
 
-// The PaperColor mounts flipped 180° (Screen::show rotates the frame so the
-// buttons sit along the top edge), which reverses the physical up/down order
-// relative to the screen. The flip is an app choice, so its key-order
-// consequence is handled here too — the SDK profile keeps the board's native
-// pin mapping.
-#if FREEINK_DEVICE_M5
+// The PaperColor and Paper Mono mount flipped 180° (Screen::show rotates the
+// frame so the buttons sit along the top edge), which reverses the physical
+// up/down order relative to the screen. The flip is an app choice, so its
+// key-order consequence is handled here too — the SDK profile keeps the
+// board's native pin mapping.
+#if FREEINK_DEVICE_M5 || FREEINK_DEVICE_PAPERMONO
 constexpr uint8_t KEY_UP = InputManager::BTN_DOWN;
 constexpr uint8_t KEY_DOWN = InputManager::BTN_UP;
 #else
@@ -127,10 +128,18 @@ bool panelMaintenanceDue(uint32_t ms) {
 }
 
 // Touch→logical mapping is SDK-owned (ui::snapshotFrom + touchToLogical, keyed
-// off the device orientation). These flips compensate only for mirrored panel
-// mounting — if taps land mirrored on the bench, flip the matching constant.
+// off the device orientation). These flips compensate for app-side frame
+// transforms and mirrored panel mounting — if taps land mirrored on the bench,
+// flip the matching constant. Paper Mono: the SDK's TouchConfig lands taps in
+// the profile-native frame, and flipFrameForMount rotates the app's frame a
+// further 180° (buttons on top), so touch gets the same 180° = both axes.
+#if FREEINK_DEVICE_PAPERMONO
+constexpr bool TOUCH_FLIP_X = true;
+constexpr bool TOUCH_FLIP_Y = true;
+#else
 constexpr bool TOUCH_FLIP_X = false;
 constexpr bool TOUCH_FLIP_Y = false;
+#endif
 
 // --- WiFi nap (settings().wifiSleepBetweenSyncs) -----------------------------
 // The radio spends most of its life off: after a sync attempt completes the
@@ -277,6 +286,7 @@ void startAlarm(const Event& ev) {
   alarmStartedMs = millis();
   lastFlashToggleMs = millis();
   flashOn = true;
+  flashShown = true;  // startAlarm pushes the first lit frame itself below
   if (settings().alarmFlashFrontlight) frontlight.setBrightness(100);
   if (settings().alarmSoundEnabled) {
     // Loops until stopAlarm(); falls back to the embedded default sound when
@@ -453,6 +463,26 @@ void loop() {
       input.wasReleased(InputManager::BTN_UP) || input.wasReleased(InputManager::BTN_DOWN) ||
       input.wasReleased(InputManager::BTN_CONFIRM) || input.wasReleased(InputManager::BTN_BACK);
 
+#if FREEINK_DEVICE_PAPERMONO
+  // A power-button release toggles hibernate (or dismisses a ringing alarm) —
+  // the same role the dedicated keys play elsewhere. On the Paper Mono both
+  // the physical power button (a PM1 PMIC click, surfaced by the SDK as a
+  // synthesized BTN_POWER) and the up+down chord hold arrive this way. NOT
+  // generic across boards: Murphy's confirm key shares the power GPIO and its
+  // input style reports it as BTN_POWER too, so an unguarded handler would
+  // turn every Murphy confirm press into hibernate.
+  if (input.wasReleased(InputManager::BTN_POWER) && ms >= keyQuietUntilMs) {
+    if (uiState == UiState::ALARM) {
+      stopAlarm(true);
+    } else if (uiState == UiState::HIBERNATING) {
+      wakeFromHibernate();
+    } else if (uiState == UiState::IDLE || uiState == UiState::SETTINGS ||
+               uiState == UiState::POPUP) {
+      enterHibernate();
+    }
+  }
+#endif
+
   // WiFi state transitions drive the boot screens. While hibernating they are
   // ignored entirely (the device is asleep); wakeFromHibernate() catches up.
   if (wifiService().modeChanged() && uiState != UiState::HIBERNATING) {
@@ -487,9 +517,15 @@ void loop() {
       webUi().consumeTestAlarm();  // ignore while already ringing
 
       // Light strobe while ringing: frontlight pulse + LEDs swapping colors.
-      if (settings().alarmFlashFrontlight && ms - lastFlashToggleMs >= FLASH_PERIOD_MS) {
+      // The buzzer warble (boards ringing through a PWM beeper) rides the same
+      // beat; alarmsound::beat is a no-op on the WAV path.
+      if (ms - lastFlashToggleMs >= FLASH_PERIOD_MS) {
         lastFlashToggleMs = ms;
         flashOn = !flashOn;
+        alarmsound::beat(flashOn);
+      }
+      if (settings().alarmFlashFrontlight && flashOn != flashShown) {
+        flashShown = flashOn;
         frontlight.setBrightness(flashOn ? 100 : 10);
         const LedColor a = ledColorFromHex(settings().alarmLedColorA);
         const LedColor b = ledColorFromHex(settings().alarmLedColorB);

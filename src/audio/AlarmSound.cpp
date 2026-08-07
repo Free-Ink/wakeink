@@ -1,5 +1,7 @@
 #include "AlarmSound.h"
 
+#include <BoardConfig.h>
+#include <Buzzer.h>
 #include <LittleFS.h>
 
 #include "DefaultAlarmWav.generated.h"
@@ -8,7 +10,13 @@ namespace alarmsound {
 
 namespace {
 File g_file;  // kept open for the duration of file-backed playback
-}
+
+// Buzzer fallback (no codec on board): a two-pitch warble, advanced by beat().
+Buzzer g_buzzer;
+bool g_buzzing = false;
+constexpr uint32_t BUZZ_HZ_A = 880;
+constexpr uint32_t BUZZ_HZ_B = 1320;
+}  // namespace
 
 AudioManager& audio() {
   static AudioManager instance;
@@ -19,7 +27,16 @@ bool hasCustom() { return LittleFS.exists(CUSTOM_PATH); }
 
 bool startLoop(uint8_t volumePercent) {
   AudioManager& am = audio();
-  if (!am.begin()) return false;
+  if (!am.begin()) {
+    // No codec: ring the PWM buzzer instead (LEDC square wave; a passive
+    // beeper has no volume control, so only volume 0 silences it).
+    if (volumePercent > 0 && BoardConfig::hasBuzzer() && g_buzzer.begin()) {
+      g_buzzer.tone(BUZZ_HZ_A, 0);
+      g_buzzing = true;
+      return true;
+    }
+    return false;
+  }
   am.setVolume(volumePercent);
 
   if (hasCustom()) {
@@ -40,8 +57,17 @@ bool startLoop(uint8_t volumePercent) {
 }
 
 void stop() {
+  if (g_buzzing) {
+    g_buzzer.noTone();
+    g_buzzing = false;
+  }
   audio().stop();
   if (g_file) g_file.close();
+}
+
+void beat(bool phase) {
+  if (!g_buzzing) return;
+  g_buzzer.tone(phase ? BUZZ_HZ_A : BUZZ_HZ_B, 0);
 }
 
 bool validateWavFile(const char* path, String& error) {

@@ -135,7 +135,7 @@ const TabDef TABS[TAB_COUNT] = {
 // chrome scales by the same factor or labels overflow their boxes. Hit
 // paddings stay unscaled: touch bands only matter on Murphy (scale 1), and on
 // the M5 the rects are only focus-rendering geometry.
-#if FREEINK_DEVICE_M5
+#if FREEINK_DEVICE_M5 || FREEINK_DEVICE_PAPERMONO
 constexpr int16_t S(int v) { return (int16_t)((v * 7 + 2) / 5); }  // x1.4
 #else
 constexpr int16_t S(int v) { return (int16_t)v; }
@@ -341,14 +341,22 @@ class SettingsCanvas {
   SettingsCanvas(uint8_t* fb, ui::InteractionBuffer<48>& buf)
       : raw(fb, W, H),
         target(raw, settings().darkMode),
-        device{W,
-               H,
-               ui::Orientation::LandscapeCounterClockwise,
-               BoardConfig::hasTouch(),
-               true,
+        device{.width = W,
+               .height = H,
+               .orientation = ui::Orientation::LandscapeCounterClockwise,
+               // Same per-device transform as Screen.cpp's makeDevice():
+               // identity on the Paper Mono (its TouchConfig already maps the
+               // FT6336 into the displayed frame), landscape CCW on Murphy.
+#if FREEINK_DEVICE_PAPERMONO
+               .touchOrientation = ui::Orientation::Portrait,
+#else
+               .touchOrientation = ui::Orientation::LandscapeCounterClockwise,
+#endif
+               .hasTouch = BoardConfig::hasTouch(),
+               .hasButtons = true,
                // Full-bleed header owns the top edge; uniform MARGIN elsewhere.
-               ui::Insets{0, MARGIN, MARGIN, MARGIN},
-               0},
+               .safeArea = ui::Insets{0, MARGIN, MARGIN, MARGIN},
+               .minTouchSize = 0},
         frame(target, device, input, buf) {}
 };
 
@@ -413,7 +421,7 @@ void SettingsScreen::drawNormal(SettingsCanvas& c) {
   // Tab bar (premade component: equal slots, selected pill, bottom divider).
   ui::TabItem tabs[TAB_COUNT];
   for (int i = 0; i < TAB_COUNT; ++i) {
-    tabs[i] = ui::TabItem{TAB_NAMES[i], (int16_t)i, i == tab_};
+    tabs[i] = ui::tabItem(i, i == tab_, true, TAB_NAMES[i]);
   }
   ui::TabBarProps tb;
   tb.tabs = tabs;

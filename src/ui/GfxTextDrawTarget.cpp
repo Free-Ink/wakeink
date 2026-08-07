@@ -5,7 +5,9 @@
 // Per-device glyph tables: the same FontId binds a ~1.4x larger table on the
 // denser PaperColor panel — the SDK's intended scaling model (font slots bind
 // different glyph sets per device; fractional glyph scaling would be mush).
-#if FREEINK_DEVICE_M5
+// Paper Mono (235 PPI) borrows the PaperColor set for bring-up; see the
+// ScreenGeometry.h note about a dedicated ~1.9x set.
+#if FREEINK_DEVICE_M5 || FREEINK_DEVICE_PAPERMONO
 #include <fonts/NotoSans14.h>
 #include <fonts/NotoSans17.h>
 #include <fonts/NotoSans17B.h>
@@ -35,7 +37,7 @@ using freeink::ui::TextAlign;
 using freeink::ui::TextStyle;
 
 const FontDef* GfxTextDrawTarget::fontFor(freeink::ui::FontId font) {
-#if FREEINK_DEVICE_M5
+#if FREEINK_DEVICE_M5 || FREEINK_DEVICE_PAPERMONO
   switch (font) {
     case FONT_TINY: return &NotoSans14;
     case FONT_SMALL: return &NotoSans17;
