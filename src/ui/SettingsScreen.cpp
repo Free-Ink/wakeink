@@ -327,6 +327,14 @@ void stepTimeOfDay(int& hour, int& minute, int dir) {
   minute = total % 60;
 }
 
+// Timezone-picker list geometry, shared by drawTzPicker and the swipe handler
+// so button paging and gesture paging agree on the window size.
+constexpr int16_t TZ_ROW_H = S(27);
+ui::Rect tzListRect() {
+  return ui::Rect{MARGIN, S(34), (int16_t)(W - 2 * MARGIN), (int16_t)(H - S(34) - S(36))};
+}
+uint16_t tzVisibleRows() { return ui::listVisibleRows(tzListRect(), TZ_ROW_H, 0); }
+
 }  // namespace
 
 // Shared render context (same pattern as Screen's Canvas).
@@ -363,6 +371,7 @@ class SettingsCanvas {
 void SettingsScreen::open() {
   tab_ = 0;
   page_ = 0;
+  scroll_ = 0;
   modal_ = Modal::NONE;
   draw(EInkDisplay::FULL_REFRESH);
 }
@@ -398,27 +407,25 @@ void SettingsScreen::drawNormal(SettingsCanvas& c) {
   // geometry, now declarative — one interaction per control). Bezel reach is
   // SDK-owned: hit rects within 12px of a screen edge snap to it.
 
-  // Header: title + Close (Back button routes here too).
+  // Header: premade component owns the whole band, Close as its trailing
+  // action button. A physical Back press still leaves settings through
+  // handleInput's fallback (Back with no routed hit closes).
   ui::HeaderProps hp;
   hp.title = "Settings";
   hp.titleText = txt(FONT_BODY_B, ui::Color::White);
   ui::StyleSet headerStyle;
   headerStyle.normal.background = ui::Paint::solid(ui::Color::Black);
   hp.styles = headerStyle;
+  hp.trailingLabel = "Close";
+  hp.trailingAction = A_CLOSE;
+  hp.trailingText = txt(FONT_SMALL_B, ui::Color::White, ui::TextAlign::Center);
+  hp.trailingStyles = onHeaderButton();
   ui::header(c.frame, ui::Rect{0, 0, W, S(30)}, hp);
 
-  ui::ButtonProps closeBtn;
-  closeBtn.label = "Close";
-  closeBtn.action = A_CLOSE;
-  closeBtn.inputMask = ui::InputDefault | ui::InputBack;
-  closeBtn.text = txt(FONT_SMALL_B, ui::Color::White, ui::TextAlign::Center);
-  closeBtn.styles = onHeaderButton();
-  closeBtn.minTouchSize = 0;
-  // Edge reach is SDK-handled now: ensureMinTouchRect snaps near-edge hit
-  // rects to the screen boundary, so the corner taps land on this button.
-  ui::button(c.frame, ui::Rect{(int16_t)(W - MARGIN - S(64)), S(3), S(64), S(24)}, closeBtn);
-
-  // Tab bar (premade component: equal slots, selected pill, bottom divider).
+  // Tab bar: content-width tabs from the leading edge (the component falls
+  // back to equal slots by itself if the labels overflow the band — which is
+  // what happens on the narrow Murphy, wide papermono gets natural widths).
+  // Horizontal swipes also switch tabs (handleSwipe).
   ui::TabItem tabs[TAB_COUNT];
   for (int i = 0; i < TAB_COUNT; ++i) {
     tabs[i] = ui::tabItem(i, i == tab_, true, TAB_NAMES[i]);
@@ -429,18 +436,36 @@ void SettingsScreen::drawNormal(SettingsCanvas& c) {
   tb.action = A_TAB;
   tb.text = txt(FONT_SMALL_B, ui::Color::Black, ui::TextAlign::Center);
   tb.tabStyles = ghostButton();  // selected = black fill, focused = heavy outline
-  tb.tabInset = ui::Insets{S(2), S(2), S(2), S(2)};
+  tb.layout = ui::TabBarLayout::ContentWidth;
+  tb.gap = S(4);
+  tb.contentInset = ui::Insets{S(2), S(10), S(2), S(10)};
+  tb.tabInset = ui::Insets{S(2), S(2), S(2), S(2)};  // equal-width fallback inset
+  tb.minTouchSize = 0;  // rows below sit close; hit bands stay the drawn pills
   tb.divider = true;
   ui::tabBar(c.frame, ui::Rect{MARGIN, S(34), (int16_t)(W - 2 * MARGIN), S(28)}, tb);
 
-  // Content rows (with simple pagination when a tab overflows).
+  // Content rows. Touch boards scroll the tab (vertical swipes page it, a
+  // scroll indicator marks the window); buttons-only boards keep the explicit
+  // pager row, which GPIO focus can reach.
   const TabDef& tab = TABS[tab_];
-  const bool paged = tab.count > MAX_ROWS;
-  const int rowsPerPage = paged ? MAX_ROWS - 1 : MAX_ROWS;  // reserve a pager row
-  const int pageCount = paged ? (tab.count + rowsPerPage - 1) / rowsPerPage : 1;
-  if (page_ >= pageCount) page_ = 0;
-  const int first = page_ * rowsPerPage;
-  const int last = min(tab.count, first + rowsPerPage);
+  const bool touchScrolls = BoardConfig::hasTouch();
+  bool paged = false;
+  int pageCount = 1;
+  int first, last;
+  if (touchScrolls) {
+    const int maxTop = tab.count > MAX_ROWS ? tab.count - MAX_ROWS : 0;
+    if (scroll_ > maxTop) scroll_ = (int16_t)maxTop;
+    if (scroll_ < 0) scroll_ = 0;
+    first = scroll_;
+    last = min(tab.count, first + MAX_ROWS);
+  } else {
+    paged = tab.count > MAX_ROWS;
+    const int rowsPerPage = paged ? MAX_ROWS - 1 : MAX_ROWS;  // reserve a pager row
+    pageCount = paged ? (tab.count + rowsPerPage - 1) / rowsPerPage : 1;
+    if (page_ >= pageCount) page_ = 0;
+    first = page_ * rowsPerPage;
+    last = min(tab.count, first + rowsPerPage);
+  }
 
   int16_t y = CONTENT_Y;
   for (int i = first; i < last; ++i, y += ROW_PITCH) {
@@ -547,6 +572,16 @@ void SettingsScreen::drawNormal(SettingsCanvas& c) {
     }
   }
 
+  if (touchScrolls && tab.count > MAX_ROWS) {
+    // Scroll indicator on the content band's right edge (the SDK list helper,
+    // reused standalone since these rows are premade row components, not a
+    // ui::list — steppers/day chips have no list-item form).
+    ui::drawListScrollIndicator(t,
+                                ui::Rect{MARGIN, CONTENT_Y, (int16_t)(W - 2 * MARGIN),
+                                         (int16_t)(MAX_ROWS * ROW_PITCH - ROW_GAP)},
+                                (uint32_t)tab.count, (uint32_t)MAX_ROWS, (uint32_t)scroll_);
+  }
+
   if (paged) {
     // Explicit pager: Prev / "Page x of y" / Next (a lone cycling "More"
     // button read as a status line, not a control). Anchored to the last row
@@ -579,31 +614,29 @@ void SettingsScreen::drawNormal(SettingsCanvas& c) {
 }
 
 void SettingsScreen::drawTzPicker(SettingsCanvas& c) {
+  // Header with Back as its trailing action. A physical Back press still
+  // closes via the (!ev && snap.back) fallback in handleInput.
   ui::HeaderProps hp;
   hp.title = "Timezone";
   hp.titleText = txt(FONT_BODY_B, ui::Color::White);
   ui::StyleSet headerStyle;
   headerStyle.normal.background = ui::Paint::solid(ui::Color::Black);
   hp.styles = headerStyle;
+  hp.trailingLabel = "Back";
+  hp.trailingAction = A_CLOSE;
+  hp.trailingText = txt(FONT_SMALL_B, ui::Color::White, ui::TextAlign::Center);
+  hp.trailingStyles = onHeaderButton();
   ui::header(c.frame, ui::Rect{0, 0, W, S(30)}, hp);
 
-  ui::ButtonProps backBtn;
-  backBtn.label = "Back";
-  backBtn.action = A_CLOSE;
-  backBtn.inputMask = ui::InputDefault | ui::InputBack;
-  backBtn.text = txt(FONT_SMALL_B, ui::Color::White, ui::TextAlign::Center);
-  backBtn.styles = onHeaderButton();
-  backBtn.minTouchSize = 0;
-  ui::button(c.frame, ui::Rect{(int16_t)(W - MARGIN - S(64)), S(3), S(64), S(24)}, backBtn);
-
-  // Zone list via the FreeInkUI list component (virtualized by topIndex).
+  // Zone list via the FreeInkUI list component (virtualized by topIndex;
+  // vertical swipes page it through handleSwipe, sharing tzListRect()).
   static ui::ListItem items[TIMEZONE_COUNT];
   for (size_t i = 0; i < TIMEZONE_COUNT; ++i) {
     items[i] = ui::ListItem{};
     items[i].label = TIMEZONES[i].name;
     items[i].actionValue = (int16_t)i;
   }
-  const ui::Rect listRect{MARGIN, S(34), (int16_t)(W - 2 * MARGIN), (int16_t)(H - S(34) - S(36))};
+  const ui::Rect listRect = tzListRect();
   ui::ListProps lp;
   lp.items = items;
   lp.count = TIMEZONE_COUNT;
@@ -611,11 +644,29 @@ void SettingsScreen::drawTzPicker(SettingsCanvas& c) {
   lp.selectedIndex = (int16_t)currentTzIndex();
   lp.action = A_TZ_ROW;
   lp.labelText = txt(FONT_SMALL);
-  lp.rowHeight = S(27);
+  lp.rowHeight = TZ_ROW_H;
+  lp.rowGap = 0;
   lp.selectionMarker = ui::SelectionMarker::Triangle;
+  lp.scrollIndicator = true;
+  // Solid-invert focus/press cue: the component's default LightGray dither
+  // reads as broken speckle on the 1-bit panels (see ghostButton).
+  {
+    ui::StyleSet rows;
+    rows.explicitlySet = true;
+    rows.normal.background = ui::Paint::solid(ui::Color::White);
+    rows.normal.foreground = ui::Paint::solid(ui::Color::Black);
+    rows.focused.background = ui::Paint::solid(ui::Color::Black);
+    rows.focused.foreground = ui::Paint::solid(ui::Color::White);
+    rows.active = rows.focused;
+    // Selected keeps the triangle marker as its cue (a solid fill on top of
+    // the marker would hide which row is the current zone while focus moves).
+    rows.selected = rows.normal;
+    rows.disabled = rows.normal;
+    lp.rowStyles = rows;
+  }
   ui::list(c.frame, listRect, lp);
 
-  const uint16_t visible = ui::listVisibleRows(listRect, lp.rowHeight, lp.rowGap);
+  const uint16_t visible = tzVisibleRows();
 
   ui::ButtonProps prev;
   prev.label = "Prev";
@@ -814,6 +865,50 @@ void SettingsScreen::moveFocusWithin(ui::ActionId action, int dir) {
   interactions_.setFocusedIndex(idxs[pos]);
 }
 
+void SettingsScreen::handleSwipe(bool up, bool down, bool left, bool right) {
+  // Dialogs stay tap/key-driven; a swipe over one is most likely a mis-tap.
+  if (modal_ == Modal::PAUSE || modal_ == Modal::REBOOT) return;
+
+  if (modal_ == Modal::TZ_PICKER) {
+    if (!up && !down) return;
+    // Same page step as the Prev/Next buttons (swipe up = later zones).
+    const int visible = (int)tzVisibleRows();
+    const int maxTop = (int)TIMEZONE_COUNT > visible ? (int)TIMEZONE_COUNT - visible : 0;
+    int next = (int)tzTop_ + (up ? visible : -visible);
+    if (next < 0) next = 0;
+    if (next > maxTop) next = maxTop;
+    if (next == (int)tzTop_) return;
+    tzTop_ = (uint16_t)next;
+    draw(EInkDisplay::HALF_REFRESH);
+    return;
+  }
+
+  if (left || right) {
+    // Swipe left pulls the next tab in, right the previous. No wrap — hitting
+    // the end is a natural stop, not a jump back to the start.
+    const int next = tab_ + (left ? 1 : -1);
+    if (next < 0 || next >= TAB_COUNT) return;
+    tab_ = next;
+    page_ = 0;
+    scroll_ = 0;
+    draw(EInkDisplay::HALF_REFRESH);
+    return;
+  }
+
+  // Vertical: page the current tab's rows (touch boards render a scroll
+  // window; buttons-only boards never get here — no touch, no swipes).
+  const TabDef& tab = TABS[tab_];
+  if (tab.count <= MAX_ROWS) return;
+  const int step = MAX_ROWS > 1 ? MAX_ROWS - 1 : 1;
+  const int maxTop = tab.count - MAX_ROWS;
+  int next = scroll_ + (up ? step : -step);
+  if (next < 0) next = 0;
+  if (next > maxTop) next = maxTop;
+  if (next == scroll_) return;
+  scroll_ = (int16_t)next;
+  draw(EInkDisplay::HALF_REFRESH);
+}
+
 SettingsScreen::Result SettingsScreen::handleInput(const ui::InputSnapshot& snap) {
   // GPIO focus moves (buttons-only boards). The PAUSE/REBOOT dialogs overlay
   // the normal view, whose controls are still registered — scope their focus
@@ -917,6 +1012,7 @@ SettingsScreen::Result SettingsScreen::handleInput(const ui::InputSnapshot& snap
     case A_TAB:
       tab_ = ev.value;
       page_ = 0;
+      scroll_ = 0;
       structural = true;
       break;
     case A_PAGE:

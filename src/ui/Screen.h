@@ -57,6 +57,11 @@ class Screen {
   void clearFocus();
   bool hasFocus() const;
 
+  // Page the idle upcoming list (touch boards: vertical swipes; the list is a
+  // virtualized ui::list with a scroll indicator). dir +1 = show later events.
+  // Returns true when the window moved — the caller redraws.
+  bool scrollUpcoming(int dir);
+
   // Pushes the framebuffer to the panel.
   void show(bool full);
 
@@ -70,4 +75,9 @@ class Screen {
  private:
   EInkDisplay& display_;
   freeink::ui::InteractionBuffer<MAX_INTERACTIONS> interactions_;
+  // Upcoming-list scroll window, maintained across drawIdle() calls and
+  // re-clamped there against the current event count / fitting rows.
+  uint16_t upcomingTop_ = 0;
+  uint16_t upcomingVisible_ = 0;
+  uint16_t upcomingCount_ = 0;
 };

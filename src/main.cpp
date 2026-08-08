@@ -25,6 +25,7 @@
 #include "config/StateStore.h"
 #include "config/WifiStore.h"
 #include "net/WifiService.h"
+#include "ui/Gestures.h"
 #include "ui/Screen.h"
 #include "ui/ScreenGeometry.h"
 #include "ui/SettingsScreen.h"
@@ -454,8 +455,12 @@ void loop() {
   const ui::InputSnapshot snap =
       ui::snapshotFrom(input, screen->deviceContext(), TOUCH_FLIP_X, TOUCH_FLIP_Y, keyBindings());
   const bool gotTap = snap.touchReleased;
-  // Any input dismisses an alarm (touch tap or a physical key).
-  const bool anyInput = gotTap || input.wasAnyPressed();
+  // Swipes, mapped through the same touch transform as taps: vertical ones
+  // page the idle/settings lists, horizontal ones switch settings tabs.
+  const wakeink::Swipe swipe =
+      wakeink::readSwipe(input, screen->deviceContext(), TOUCH_FLIP_X, TOUCH_FLIP_Y);
+  // Any input dismisses an alarm (touch tap, swipe, or a physical key).
+  const bool anyInput = gotTap || (bool)swipe || input.wasAnyPressed();
   // Release edges drive the idle/hibernate key actions: a synthesized CONFIRM
   // (M5's shared key) arrives as press+release in one update, and acting on
   // release keeps chords and wake presses from double-firing.
@@ -570,6 +575,19 @@ void loop() {
       }
       if (webUi().consumeTestAlarm()) {
         startTestAlarm(now);
+        break;
+      }
+
+      // Vertical swipes page the upcoming list (the ui::list windows itself
+      // by topIndex; scrollUpcoming moves the window and reports whether it
+      // moved, so an end-of-list swipe doesn't waste a refresh). Swipes are
+      // consumed here entirely: the finger-lift also arrives as an off-target
+      // touchReleased in the snapshot, which would otherwise read as an
+      // empty-space tap below and force a sync + full redraw.
+      if (swipe) {
+        if ((swipe.up || swipe.down) && screen->scrollUpcoming(swipe.up ? 1 : -1)) {
+          drawIdleScreen(false);
+        }
         break;
       }
 
@@ -744,6 +762,14 @@ void loop() {
       // Keep info rows (last sync, pause countdown) fresh when a sync lands.
       if (calendarManager().consumeDirtyFlag()) settingsScreen->redraw();
 
+      // Gestures: horizontal swipes switch tabs, vertical swipes page the
+      // rows / timezone list. Redrawn internally.
+      if (swipe) {
+        settingsLastInputMs = ms;
+        settingsScreen->handleSwipe(swipe.up, swipe.down, swipe.left, swipe.right);
+        break;
+      }
+
       // Buttons-only boards: up/down releases walk the GPIO focus through the
       // controls (SettingsScreen redraws to show the outline); a short confirm
       // press activates the focused control; hold (Back) closes/cancels.
@@ -820,7 +846,7 @@ void loop() {
       webUi().consumeTestAlarm();
       webUi().consumeDismiss();
       webUi().consumeDisplayRefresh();
-      if (gotTap || anyKeyReleased) {
+      if (gotTap || (bool)swipe || anyKeyReleased) {
         wakeFromHibernate();
         break;
       }

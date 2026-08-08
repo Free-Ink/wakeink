@@ -34,6 +34,11 @@ class SettingsScreen {
   // Route a mapped input snapshot (tap and/or Back) from ui::snapshotFrom.
   Result handleInput(const freeink::ui::InputSnapshot& snap);
 
+  // Touch gestures (redraws internally): horizontal swipes switch tabs,
+  // vertical swipes page the current tab's rows / the timezone list. No-op
+  // over the pause/reboot dialogs.
+  void handleSwipe(bool up, bool down, bool left, bool right);
+
   // Re-render in place (e.g. after a sync finishes, to update info rows).
   void redraw();
 
@@ -65,7 +70,8 @@ class SettingsScreen {
   FrontlightManager& frontlight_;
   freeink::ui::InteractionBuffer<48> interactions_;
   int tab_ = 0;
-  int page_ = 0;        // page within the current tab (Filter spans two)
+  int page_ = 0;         // buttons-only boards: page within the current tab
+  int16_t scroll_ = 0;   // touch boards: first visible row of the current tab
   Modal modal_ = Modal::NONE;
   uint16_t tzTop_ = 0;  // timezone picker scroll position
 };

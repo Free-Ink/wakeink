@@ -95,6 +95,22 @@ ui::StyleSet invertedBanner() {
   return st;
 }
 
+// List rows: solid-invert focus/press cues. The component default uses a
+// LightGray dither for focus, which reads as broken speckle on the 1-bit
+// panels (same lesson as every other style set here).
+ui::StyleSet listRows() {
+  ui::StyleSet st;
+  st.explicitlySet = true;
+  st.normal.background = ui::Paint::solid(ui::Color::White);
+  st.normal.foreground = ui::Paint::solid(ui::Color::Black);
+  st.focused.background = ui::Paint::solid(ui::Color::Black);
+  st.focused.foreground = ui::Paint::solid(ui::Color::White);
+  st.selected = st.focused;
+  st.active = st.focused;
+  st.disabled = st.normal;
+  return st;
+}
+
 ui::StyleSet dialogPanel() {
   ui::StyleSet st;
   st.normal.background = ui::Paint::solid(ui::Color::White);
@@ -355,26 +371,45 @@ void Screen::drawIdle(const std::vector<Event>& events, const SyncStatus& sync, 
          ui::Paint::solid(ui::Color::Black));
   y += 6;
 
-  // --- upcoming list (each row tappable; value = event index) -----------------
-  const int16_t rowH = lh(t, FONT_SMALL) + 4;
-  const int16_t timeColW = wakeink::UI_TIME_COL_W;
-  for (size_t i = 1; i < events.size(); ++i) {
-    if (y + rowH > footer.y - 4) break;
-    const Event& ev = events[i];
-    // Register the hit before drawing so stateFor() can see this row's focus
-    // (the same order FreeInkUI components use); a GPIO-focused row renders
-    // inverted as the selection cue.
-    c.frame.hit(ui::Rect{0, y, W, rowH}, TAP_EVENT, (int16_t)i);
-    const bool focused = ui::hasState(c.frame.stateFor(TAP_EVENT, (int16_t)i), ui::StateFocused);
-    if (focused) t.fill(ui::Rect{0, y, W, rowH}, ui::Paint::solid(ui::Color::Black), 0, ui::CornersAll);
-    const ui::Color ink = focused ? ui::Color::White : ui::Color::Black;
-    ui::drawText(t, ui::Rect{contentX, y, timeColW, rowH}, listTimeLabel(ev.start, now, use24).c_str(),
-                 style(FONT_SMALL_B, ink));
-    ui::drawText(t,
-                 ui::Rect{(int16_t)(contentX + timeColW + 6), y,
-                          (int16_t)(contentW - timeColW - 6), rowH},
-                 ev.title.c_str(), style(FONT_SMALL, ink));
-    y += rowH;
+  // --- upcoming list: FreeInkUI virtualized list ------------------------------
+  // Title left, time as the trailing value (the premade slot layout). The list
+  // windows itself by topIndex — vertical swipes page it via scrollUpcoming()
+  // — and draws its own scroll indicator when events overflow the band. Rows
+  // register their hits with the absolute event index as the action value, so
+  // TAP_EVENT routing is unchanged.
+  upcomingCount_ = (uint16_t)(events.size() - 1);
+  const ui::Rect listRect{contentX, y, contentW, (int16_t)(footer.y - 4 - y)};
+  if (upcomingCount_ > 0 && listRect.height > 0) {
+    // Per-row time strings live here so their c_str()s survive until list()
+    // has drawn (the component reads, it doesn't retain).
+    std::vector<String> times(upcomingCount_);
+    std::vector<ui::ListItem> items(upcomingCount_);
+    for (uint16_t i = 0; i < upcomingCount_; ++i) {
+      const Event& ev = events[i + 1];
+      times[i] = listTimeLabel(ev.start, now, use24);
+      items[i].label = ev.title.c_str();
+      items[i].value = times[i].c_str();
+      items[i].actionValue = (int16_t)(i + 1);  // absolute index into `events`
+    }
+    ui::ListProps lp;
+    lp.items = items.data();
+    lp.count = upcomingCount_;
+    lp.rowHeight = (int16_t)(lh(t, FONT_SMALL) + 4);
+    lp.rowGap = 0;
+    lp.action = TAP_EVENT;
+    lp.labelText = style(FONT_SMALL);
+    lp.valueText = style(FONT_SMALL_B, ui::Color::Black, ui::TextAlign::Right);
+    lp.rowStyles = listRows();
+    upcomingVisible_ = ui::listVisibleRows(listRect, lp.rowHeight, lp.rowGap);
+    const uint16_t maxTop =
+        upcomingCount_ > upcomingVisible_ ? (uint16_t)(upcomingCount_ - upcomingVisible_) : 0;
+    if (upcomingTop_ > maxTop) upcomingTop_ = maxTop;
+    lp.topIndex = upcomingTop_;
+    lp.scrollIndicator = true;
+    ui::list(c.frame, listRect, lp);
+  } else {
+    upcomingVisible_ = 0;
+    upcomingTop_ = 0;
   }
 
   // Breadcrumb if the list ever out-grows the interaction buffer (rows past the
@@ -444,6 +479,19 @@ void Screen::focusAction(int action) {
 }
 
 void Screen::clearFocus() { interactions_.setFocusedIndex(-1); }
+
+bool Screen::scrollUpcoming(int dir) {
+  if (upcomingCount_ <= upcomingVisible_ || upcomingVisible_ == 0) return false;
+  const uint16_t maxTop = (uint16_t)(upcomingCount_ - upcomingVisible_);
+  // Page by visible-minus-one so one row carries over as the reading anchor.
+  const int step = upcomingVisible_ > 1 ? upcomingVisible_ - 1 : 1;
+  int next = (int)upcomingTop_ + dir * step;
+  if (next < 0) next = 0;
+  if (next > (int)maxTop) next = (int)maxTop;
+  if ((uint16_t)next == upcomingTop_) return false;
+  upcomingTop_ = (uint16_t)next;
+  return true;
+}
 
 bool Screen::hasFocus() const { return interactions_.focusedIndex() >= 0; }
 
