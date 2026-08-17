@@ -23,10 +23,14 @@ class Screen {
 #if FREEINK_DEVICE_M5
     // Spectra-6 color: FULL_REFRESH always runs the complete OTP waveform
     // (every standing image is a clean, truthful render — never a parked
-    // cut-off frame), and the accent plane recolors marked ink to red on
-    // those renders. Interrupted refreshes (transient frames) ignore it.
-    memset(accentPlane_, 0, sizeof(accentPlane_));
-    display_.setAccentPlane(accentPlane_, EInkDisplay::SPECTRA_RED);
+    // cut-off frame), and two accent planes recolor marked ink on those
+    // renders: red for urgency (countdown, wifi-down), blue for chrome
+    // (status bar, banners, divider, links). Interrupted refreshes
+    // (transient frames) ignore them.
+    accentRed_ = allocPlane();
+    accentBlue_ = allocPlane();
+    display_.setAccentPlaneSlot(0, accentRed_, EInkDisplay::SPECTRA_RED);
+    display_.setAccentPlaneSlot(1, accentBlue_, EInkDisplay::SPECTRA_BLUE);
     display_.setFullRefreshCompletesWaveform(true);
 #endif
   }
@@ -86,15 +90,21 @@ class Screen {
  private:
   EInkDisplay& display_;
 #if FREEINK_DEVICE_M5
-  // 1-bit accent overlay, same geometry as the framebuffer: set bits recolor
-  // ink pixels to the accent color on complete-waveform renders. Cleared at
+  // 1-bit accent overlays, same geometry as the framebuffer: set bits recolor
+  // ink pixels to the slot's color on complete-waveform renders. Cleared at
   // the start of each draw, marked per-element, flipped alongside the frame.
-  uint8_t accentPlane_[(wakeink::SCREEN_W / 8) * wakeink::SCREEN_H];
+  // PSRAM-backed (heap fallback); a failed allocation just disables that color.
+  static constexpr uint32_t PLANE_BYTES =
+      (uint32_t)(wakeink::SCREEN_W / 8) * wakeink::SCREEN_H;
+  uint8_t* accentRed_ = nullptr;
+  uint8_t* accentBlue_ = nullptr;
+  static uint8_t* allocPlane();
 #endif
-  // Reset the accent overlay (start of every draw) / mark a region so its ink
-  // renders in the accent color on standing images. No-ops off the M5.
+  // Reset the accent overlays (start of every draw) / mark a region so its ink
+  // renders in that color on standing images. No-ops off the M5.
   void clearAccent();
-  void markAccent(freeink::ui::Rect r);
+  void markAccentRed(freeink::ui::Rect r);
+  void markAccentBlue(freeink::ui::Rect r);
   freeink::ui::InteractionBuffer<MAX_INTERACTIONS> interactions_;
   // Upcoming-list scroll window, maintained across drawIdle() calls and
   // re-clamped there against the current event count / fitting rows.

@@ -230,24 +230,55 @@ void Screen::show(bool full) {
   // corrupts later drawing.
   wakeink::flipFrameForMount(display_.getFrameBuffer(), display_.getBufferSize());
 #if FREEINK_DEVICE_M5
-  // The accent plane must track the frame pixel-for-pixel through the flip.
-  wakeink::flipFrameForMount(accentPlane_, sizeof(accentPlane_));
+  // The accent planes must track the frame pixel-for-pixel through the flip.
+  if (accentRed_) wakeink::flipFrameForMount(accentRed_, PLANE_BYTES);
+  if (accentBlue_) wakeink::flipFrameForMount(accentBlue_, PLANE_BYTES);
 #endif
   display_.displayBuffer(full ? EInkDisplay::FULL_REFRESH : EInkDisplay::FAST_REFRESH);
 }
 
-// Accent overlay (M5 Spectra-6). The plane shares the framebuffer's bit
+// Accent overlays (M5 Spectra-6). The planes share the framebuffer's bit
 // layout; GfxText's "white" (a set bit) marks a pixel as accent-colored.
+#if FREEINK_DEVICE_M5
+uint8_t* Screen::allocPlane() {
+  // PSRAM first — the driver only reads the planes during the ~15 s complete
+  // pass, so PSRAM latency is irrelevant; heap fallback keeps color alive if
+  // PSRAM is ever disabled. nullptr just leaves that color off.
+  uint8_t* p = (uint8_t*)ps_malloc(PLANE_BYTES);
+  if (!p) p = (uint8_t*)malloc(PLANE_BYTES);
+  if (p) memset(p, 0, PLANE_BYTES);
+  return p;
+}
+#endif
+
+#if FREEINK_DEVICE_M5
+namespace {
+void markPlane(uint8_t* plane, ui::Rect r) {
+  if (!plane) return;
+  GfxText g(plane, W, H);
+  g.fillRect(r.x, r.y, r.width, r.height, /*black=*/false);  // set bits
+}
+}  // namespace
+#endif
+
 void Screen::clearAccent() {
 #if FREEINK_DEVICE_M5
-  memset(accentPlane_, 0, sizeof(accentPlane_));
+  if (accentRed_) memset(accentRed_, 0, PLANE_BYTES);
+  if (accentBlue_) memset(accentBlue_, 0, PLANE_BYTES);
 #endif
 }
 
-void Screen::markAccent(ui::Rect r) {
+void Screen::markAccentRed(ui::Rect r) {
 #if FREEINK_DEVICE_M5
-  GfxText plane(accentPlane_, W, H);
-  plane.fillRect(r.x, r.y, r.width, r.height, /*black=*/false);  // set bits
+  markPlane(accentRed_, r);
+#else
+  (void)r;
+#endif
+}
+
+void Screen::markAccentBlue(ui::Rect r) {
+#if FREEINK_DEVICE_M5
+  markPlane(accentBlue_, r);
 #else
   (void)r;
 #endif
@@ -297,13 +328,21 @@ void Screen::drawIdle(const std::vector<Event>& events, const SyncStatus& sync, 
   sb.trailing = clockStr.c_str();
   if (!badge.isEmpty()) sb.title = badge.c_str();
   ui::statusBar(c.frame, ui::Rect{0, 0, W, HEADER_H}, sb);  // full-bleed across the top
+  // Color: the bar's solid ink band renders blue (its white text is untouched
+  // — accents only recolor ink).
+  markAccentBlue(ui::Rect{0, 0, W, HEADER_H});
 
-  // --- footer: wakeink.local + IP, with the settings cog at bottom-right ------
-  const int16_t footerW = (int16_t)(footer.width - 40);  // keep clear of the cog
+  // --- footer: wakeink.local + IP, with the settings cog at bottom-right on
+  // touch boards (buttons-only boards hide it: with up/down scrolling the list
+  // and confirm opening the next event's dialog, nothing can reach it — those
+  // devices are configured on the web dashboard).
+  const int16_t footerW = (int16_t)(footer.width - (BoardConfig::hasTouch() ? 40 : 0));
   String footerDetail;
   if (wifiUp) {
     ui::drawText(t, ui::Rect{footer.x, footer.y, footerW, lh(t, FONT_SMALL_B)},
                  ("http://" + hostname + ".local").c_str(), style(FONT_SMALL_B));
+    // Color: the dashboard URL is a link — render it blue.
+    markAccentBlue(ui::Rect{footer.x, footer.y, footerW, lh(t, FONT_SMALL_B)});
     footerDetail = ip;
     if (sync.lastSyncTime) footerDetail += "  ·  synced " + formatClock(sync.lastSyncTime, use24);
     ui::drawText(t,
@@ -313,15 +352,13 @@ void Screen::drawIdle(const std::vector<Event>& events, const SyncStatus& sync, 
   } else {
     ui::drawText(t, ui::Rect{footer.x, footer.y, footerW, lh(t, FONT_SMALL_B)},
                  "WiFi disconnected", style(FONT_SMALL_B));
+    markAccentRed(ui::Rect{footer.x, footer.y, footerW, lh(t, FONT_SMALL_B)});  // warning
   }
 
   // Settings cog (FreeInkUI button with an icon; white background so the
   // default button box doesn't draw a frame around it). Edge/corner reach is
   // SDK-handled: ensureMinTouchRect snaps near-edge hit rects to the bezel.
-  // On touchless boards (M5 PaperColor) the cog is reached by GPIO focus:
-  // up/down cycle events then the cog; confirm opens settings. The focused
-  // style outlines it as the selection cue.
-  {
+  if (BoardConfig::hasTouch()) {
     ui::ButtonProps cog;
     // SDK Lucide "settings" icon (freeink::Icon, Mask1: bit 0 = draw).
     cog.icon = ui::BitmapRef{icon_settings_24.bits, icon_settings_24.w, icon_settings_24.h,
@@ -342,10 +379,11 @@ void Screen::drawIdle(const std::vector<Event>& events, const SyncStatus& sync, 
                  style(FONT_BODY, ui::Color::Black, ui::TextAlign::Center));
     if (sync.calendarsTotal == 0) {
       const String hint = "Add calendars at http://" + (wifiUp ? ip : String("192.168.4.1"));
-      ui::drawText(t,
-                   ui::Rect{content.x, (int16_t)(emptyY + lh(t, FONT_BODY) + 10), content.width,
-                            lh(t, FONT_SMALL)},
-                   hint.c_str(), style(FONT_SMALL, ui::Color::Black, ui::TextAlign::Center));
+      const ui::Rect hintRect{content.x, (int16_t)(emptyY + lh(t, FONT_BODY) + 10), content.width,
+                              lh(t, FONT_SMALL)};
+      ui::drawText(t, hintRect, hint.c_str(),
+                   style(FONT_SMALL, ui::Color::Black, ui::TextAlign::Center));
+      markAccentBlue(hintRect);  // setup link
     }
     return;
   }
@@ -379,13 +417,18 @@ void Screen::drawIdle(const std::vector<Event>& events, const SyncStatus& sync, 
   const ui::Rect timeRow{contentX, y, contentW, lh(t, FONT_BODY)};
   ui::drawText(t, timeRow, when.c_str(), style(FONT_BODY));
   ui::drawText(t, timeRow, count.c_str(), style(FONT_BODY_B, ui::Color::Black, ui::TextAlign::Right));
+  // Color: the countdown is the most urgent datum on screen — red, and only
+  // it (title/time stay black so the red actually pops). Mark just the
+  // right-aligned countdown's measured extent, not the whole time row.
+  {
+    const ui::Size countSz = t.measureText(FONT_BODY_B, count.c_str(), style(FONT_BODY_B));
+    markAccentRed(ui::Rect{(int16_t)(timeRow.right() - countSz.width - 2), timeRow.y,
+                           (int16_t)(countSz.width + 2), timeRow.height});
+  }
   y += lh(t, FONT_BODY) + 5;
 
   // The whole next-event card is tappable (value 0 = events.front()). With GPIO
   // focus on it (buttons-only boards), outline the card as the selection cue.
-  // On the color panel the card's ink (title, time, countdown) renders red on
-  // standing images — the accent rides complete-waveform refreshes only.
-  markAccent(ui::Rect{0, cardTop, W, (int16_t)(y - cardTop)});
   c.frame.hit(ui::Rect{0, cardTop, W, (int16_t)(y - cardTop)}, TAP_EVENT, 0);
   if (ui::hasState(c.frame.stateFor(TAP_EVENT, 0), ui::StateFocused)) {
     t.stroke(ui::Rect{2, (int16_t)(cardTop - 3), W - 4, (int16_t)(y - cardTop + 4)},
@@ -394,6 +437,7 @@ void Screen::drawIdle(const std::vector<Event>& events, const SyncStatus& sync, 
 
   t.line(ui::Point{contentX, y}, ui::Point{(int16_t)(contentX + contentW), y}, 1,
          ui::Paint::solid(ui::Color::Black));
+  markAccentBlue(ui::Rect{contentX, y, contentW, 1});  // divider echoes the bar
   y += 6;
 
   // --- upcoming list: FreeInkUI virtualized list ------------------------------
@@ -570,6 +614,7 @@ void Screen::drawSetupPortal(const String& apSsid, const String& ip, const Strin
   hp.title = "WakeInk Setup";
   hp.titleText = style(FONT_BODY_B, ui::Color::White);
   ui::header(c.frame, ui::Rect{0, 0, W, BANNER_H}, hp);
+  markAccentBlue(ui::Rect{0, 0, W, BANNER_H});  // brand chrome (QR stays black)
 
   const ui::Rect safe = c.device.safeRect();
   // QR (right) joins the open AP in one scan (WIFI: URI format).
@@ -610,6 +655,7 @@ void Screen::drawHibernate(time_t now) {
   hp.title = "WakeInk is hibernating...";
   hp.titleText = style(FONT_BODY_B, ui::Color::White, ui::TextAlign::Center);
   ui::header(c.frame, ui::Rect{0, 0, W, BANNER_H}, hp);
+  markAccentBlue(ui::Rect{0, 0, W, BANNER_H});  // brand chrome
 
   // Big clock (with the date beneath) centered in the space below the banner.
   const String clock = formatClock(now, settings().use24HourTime);
@@ -635,6 +681,7 @@ void Screen::drawMessage(const char* title, const char* line1, const char* line2
   hp.title = title;
   hp.titleText = style(FONT_BODY_B, ui::Color::White);
   ui::header(c.frame, ui::Rect{0, 0, W, BANNER_H}, hp);
+  markAccentBlue(ui::Rect{0, 0, W, BANNER_H});  // brand chrome
 
   const ui::Rect safe = c.device.safeRect();
   int16_t y = (int16_t)(BANNER_H * 2);

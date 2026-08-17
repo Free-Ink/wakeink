@@ -63,16 +63,12 @@ uint32_t fastRefreshCount = 0;
 constexpr uint32_t FLASH_PERIOD_MS = 600;
 constexpr uint32_t FULL_REFRESH_EVERY = 30;  // minute ticks between deep cleans
 
-// Up+down key chord (buttons-only boards) toggles dark mode, mirroring
-// CrossPoint's PaperColor invert combo: one toggle per chord press, and a
-// cooldown so the chord's own key releases don't fire the single-key actions.
-bool darkChordArmed = true;
+// Up+down key chord (buttons-only boards) triggers a manual complete refresh
+// (a deep clean on demand): one fire per chord press, and a cooldown so the
+// chord's own key releases don't fire the single-key actions.
+bool refreshChordArmed = true;
 uint32_t lastChordMs = 0;
 constexpr uint32_t CHORD_COOLDOWN_MS = 600;
-// GPIO event selection (buttons-only boards): an untouched selection clears
-// itself after this long so the idle screen doesn't keep a stale highlight.
-uint32_t lastFocusInputMs = 0;
-constexpr uint32_t FOCUS_TIMEOUT_MS = 30000;
 
 // The PaperColor and Paper Mono mount flipped 180° (Screen::show rotates the
 // frame so the buttons sit along the top edge), which reverses the physical
@@ -624,33 +620,27 @@ void loop() {
         break;
       }
 
-      // No touch on this board: the physical keys drive event selection.
-      // Holding up+down together toggles dark mode. On single key releases:
-      // up/down move the GPIO focus through the event list, a short confirm
-      // press (GPIO1 on the PaperColor) opens the focused event's skip popup
-      // (or starts a selection if none), and a press-and-hold of the same key
-      // (the synthesized BACK) hibernates. Actions fire on RELEASE, after a
-      // chord cooldown, so a forming or ending chord can't trigger them.
+      // No touch on this board: the physical keys drive the idle screen.
+      // Holding up+down together forces a complete refresh. On single key
+      // releases:
+      // up/down scroll the upcoming list directly (one page per press — the
+      // button equivalent of a touch swipe), a single short confirm press
+      // (GPIO1 on the PaperColor) opens the skip dialog for the current
+      // (next) event, and a press-and-hold of the same key (the synthesized
+      // BACK) hibernates. Actions fire on RELEASE, after a chord cooldown,
+      // so a forming or ending chord can't trigger them.
       if (!BoardConfig::hasTouch()) {
         if (input.isPressed(InputManager::BTN_UP) && input.isPressed(InputManager::BTN_DOWN)) {
           lastChordMs = ms;
-          if (darkChordArmed) {
-            darkChordArmed = false;
-            settings().darkMode = !settings().darkMode;
-            settings().save();
-            noteCompletePass(ms);  // polarity swap: standing image, complete render
+          if (refreshChordArmed) {
+            refreshChordArmed = false;
+            // Manual deep clean: complete render now, schedule re-anchored.
+            noteCompletePass(ms);
             drawIdleScreen(true);
           }
           break;
         }
-        darkChordArmed = true;
-
-        // Stale selection fades out instead of lingering forever.
-        if (screen->hasFocus() && ms - lastFocusInputMs > FOCUS_TIMEOUT_MS) {
-          screen->clearFocus();
-          drawIdleScreen(false);
-          break;
-        }
+        refreshChordArmed = true;
 
         if (anyKeyReleased && ms - lastChordMs > CHORD_COOLDOWN_MS && ms >= keyQuietUntilMs) {
           if (input.wasReleased(InputManager::BTN_BACK)) {
@@ -659,44 +649,28 @@ void loop() {
           }
           if (input.wasReleased(KEY_UP) ||
               input.wasReleased(KEY_DOWN)) {
-            // Move the selection (release-edge, so a chord can't half-fire).
-            // With no selection yet, the first press starts one at the top.
-            lastFocusInputMs = ms;
-            if (!screen->hasFocus()) {
-              screen->focusAction(Screen::TAP_EVENT);
-            } else {
-              ui::InputSnapshot nav{};
-              nav.focusPrev = input.wasReleased(KEY_UP);
-              nav.focusNext = input.wasReleased(KEY_DOWN);
-              screen->route(nav);
+            // Scroll the list immediately (release-edge, so a chord can't
+            // half-fire); redraw only when the window actually moved, so an
+            // end-of-list press doesn't waste a refresh.
+            if (screen->scrollUpcoming(input.wasReleased(KEY_DOWN) ? 1 : -1)) {
+              drawIdleScreen(false);
             }
-            drawIdleScreen(false);
             break;
           }
           if (snap.confirm) {
-            if (!screen->hasFocus()) {
-              lastFocusInputMs = ms;
-              screen->focusAction(Screen::TAP_EVENT);
-              drawIdleScreen(false);
-              break;
-            }
-            const Screen::Tap r = screen->route(snap);
-            if (r.action == Screen::TAP_EVENT) {
-              const auto events = calendarManager().snapshot();
-              if (r.value >= 0 && r.value < (int)events.size()) {
-                popupEvent = events[r.value];
-                uiState = UiState::POPUP;
-                // Double draw: the first registers the dialog's interactions,
-                // then focus lands on Skip and the second renders it outlined.
-                screen->drawEventPopup(popupEvent, now);
-                screen->focusAction(Screen::TAP_SKIP);
-                screen->drawEventPopup(popupEvent, now);
-                screen->show(TRANSIENT_FULL);  // dialog: quick frame, complete render on close
-              }
-            } else if (r.action == Screen::TAP_SETTINGS) {
-              uiState = UiState::SETTINGS;
-              settingsLastInputMs = ms;
-              settingsScreen->open();
+            // One press opens the skip dialog for the current (next) event —
+            // no focus-selection step in between. Settings stays web-only
+            // here (the cog is hidden on buttons-only boards).
+            const auto events = calendarManager().snapshot();
+            if (!events.empty()) {
+              popupEvent = events.front();
+              uiState = UiState::POPUP;
+              // Double draw: the first registers the dialog's interactions,
+              // then focus lands on Skip and the second renders it outlined.
+              screen->drawEventPopup(popupEvent, now);
+              screen->focusAction(Screen::TAP_SKIP);
+              screen->drawEventPopup(popupEvent, now);
+              screen->show(TRANSIENT_FULL);  // dialog: quick frame, complete render on close
             }
             break;
           }
