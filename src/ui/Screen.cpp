@@ -229,7 +229,28 @@ void Screen::show(bool full) {
   // Every draw repaints from scratch, so flipping the buffer in place never
   // corrupts later drawing.
   wakeink::flipFrameForMount(display_.getFrameBuffer(), display_.getBufferSize());
+#if FREEINK_DEVICE_M5
+  // The accent plane must track the frame pixel-for-pixel through the flip.
+  wakeink::flipFrameForMount(accentPlane_, sizeof(accentPlane_));
+#endif
   display_.displayBuffer(full ? EInkDisplay::FULL_REFRESH : EInkDisplay::FAST_REFRESH);
+}
+
+// Accent overlay (M5 Spectra-6). The plane shares the framebuffer's bit
+// layout; GfxText's "white" (a set bit) marks a pixel as accent-colored.
+void Screen::clearAccent() {
+#if FREEINK_DEVICE_M5
+  memset(accentPlane_, 0, sizeof(accentPlane_));
+#endif
+}
+
+void Screen::markAccent(ui::Rect r) {
+#if FREEINK_DEVICE_M5
+  GfxText plane(accentPlane_, W, H);
+  plane.fillRect(r.x, r.y, r.width, r.height, /*black=*/false);  // set bits
+#else
+  (void)r;
+#endif
 }
 
 void Screen::drawIdle(const std::vector<Event>& events, const SyncStatus& sync, const String& ssid,
@@ -237,6 +258,7 @@ void Screen::drawIdle(const std::vector<Event>& events, const SyncStatus& sync, 
                       time_t now) {
   (void)ssid;
   display_.clearScreen(clearColor());
+  clearAccent();
   Canvas c(display_.getFrameBuffer(), interactions_);
   ui::DrawTarget& t = c.target;
   const bool use24 = settings().use24HourTime;
@@ -361,6 +383,9 @@ void Screen::drawIdle(const std::vector<Event>& events, const SyncStatus& sync, 
 
   // The whole next-event card is tappable (value 0 = events.front()). With GPIO
   // focus on it (buttons-only boards), outline the card as the selection cue.
+  // On the color panel the card's ink (title, time, countdown) renders red on
+  // standing images — the accent rides complete-waveform refreshes only.
+  markAccent(ui::Rect{0, cardTop, W, (int16_t)(y - cardTop)});
   c.frame.hit(ui::Rect{0, cardTop, W, (int16_t)(y - cardTop)}, TAP_EVENT, 0);
   if (ui::hasState(c.frame.stateFor(TAP_EVENT, 0), ui::StateFocused)) {
     t.stroke(ui::Rect{2, (int16_t)(cardTop - 3), W - 4, (int16_t)(y - cardTop + 4)},
@@ -420,6 +445,7 @@ void Screen::drawIdle(const std::vector<Event>& events, const SyncStatus& sync, 
 void Screen::drawEventPopup(const Event& ev, time_t now) {
   (void)now;
   display_.clearScreen(clearColor());
+  clearAccent();
   Canvas c(display_.getFrameBuffer(), interactions_);
   const bool use24 = settings().use24HourTime;
   const String when = formatClock(ev.start, use24) + " - " + formatClock(ev.end, use24);
@@ -497,6 +523,7 @@ bool Screen::hasFocus() const { return interactions_.focusedIndex() >= 0; }
 
 void Screen::drawAlarm(const Event& ev, time_t now) {
   display_.clearScreen(clearColor());
+  clearAccent();
   Canvas c(display_.getFrameBuffer(), interactions_);
   ui::DrawTarget& t = c.target;
   const bool use24 = settings().use24HourTime;
@@ -534,6 +561,7 @@ void Screen::drawAlarm(const Event& ev, time_t now) {
 
 void Screen::drawSetupPortal(const String& apSsid, const String& ip, const String& failNote) {
   display_.clearScreen(clearColor());
+  clearAccent();
   Canvas c(display_.getFrameBuffer(), interactions_);
   ui::DrawTarget& t = c.target;
 
@@ -572,6 +600,7 @@ void Screen::drawSetupPortal(const String& apSsid, const String& ip, const Strin
 
 void Screen::drawHibernate(time_t now) {
   display_.clearScreen(clearColor());
+  clearAccent();
   Canvas c(display_.getFrameBuffer(), interactions_);
   ui::DrawTarget& t = c.target;
 
@@ -597,6 +626,7 @@ void Screen::drawHibernate(time_t now) {
 
 void Screen::drawMessage(const char* title, const char* line1, const char* line2) {
   display_.clearScreen(clearColor());
+  clearAccent();
   Canvas c(display_.getFrameBuffer(), interactions_);
   ui::DrawTarget& t = c.target;
 

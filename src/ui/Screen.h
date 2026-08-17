@@ -15,10 +15,21 @@
 
 #include "../calendar/CalendarManager.h"
 #include "../calendar/Event.h"
+#include "ScreenGeometry.h"
 
 class Screen {
  public:
-  explicit Screen(EInkDisplay& display) : display_(display) {}
+  explicit Screen(EInkDisplay& display) : display_(display) {
+#if FREEINK_DEVICE_M5
+    // Spectra-6 color: FULL_REFRESH always runs the complete OTP waveform
+    // (every standing image is a clean, truthful render — never a parked
+    // cut-off frame), and the accent plane recolors marked ink to red on
+    // those renders. Interrupted refreshes (transient frames) ignore it.
+    memset(accentPlane_, 0, sizeof(accentPlane_));
+    display_.setAccentPlane(accentPlane_, EInkDisplay::SPECTRA_RED);
+    display_.setFullRefreshCompletesWaveform(true);
+#endif
+  }
 
   // Tap routing result. action is one of the TAP_* constants; for TAP_EVENT,
   // value is the index into the event list passed to the last drawIdle().
@@ -74,6 +85,16 @@ class Screen {
 
  private:
   EInkDisplay& display_;
+#if FREEINK_DEVICE_M5
+  // 1-bit accent overlay, same geometry as the framebuffer: set bits recolor
+  // ink pixels to the accent color on complete-waveform renders. Cleared at
+  // the start of each draw, marked per-element, flipped alongside the frame.
+  uint8_t accentPlane_[(wakeink::SCREEN_W / 8) * wakeink::SCREEN_H];
+#endif
+  // Reset the accent overlay (start of every draw) / mark a region so its ink
+  // renders in the accent color on standing images. No-ops off the M5.
+  void clearAccent();
+  void markAccent(freeink::ui::Rect r);
   freeink::ui::InteractionBuffer<MAX_INTERACTIONS> interactions_;
   // Upcoming-list scroll window, maintained across drawIdle() calls and
   // re-clamped there against the current event count / fitting rows.

@@ -373,7 +373,14 @@ void SettingsScreen::open() {
   page_ = 0;
   scroll_ = 0;
   modal_ = Modal::NONE;
+#if FREEINK_DEVICE_M5
+  // The menu is transient UI: FULL on the M5 now runs the ~15 s complete
+  // waveform (standing-image policy), so open with the interrupted HALF —
+  // idle's complete render returns on close.
+  draw(EInkDisplay::HALF_REFRESH);
+#else
   draw(EInkDisplay::FULL_REFRESH);
+#endif
 }
 
 void SettingsScreen::redraw() { draw(EInkDisplay::FAST_REFRESH); }

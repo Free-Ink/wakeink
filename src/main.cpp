@@ -108,14 +108,28 @@ constexpr uint32_t LED_ASSERT_PERIOD_MS = 500;
 
 // M5 PaperColor refresh strategy: interrupted refreshes are never clean for
 // long — regardless of polarity the panel muddies and darkens within minutes
-// of standing on one. So the STANDING image is always the complete OTP
-// waveform's truthful render (true white, full color), redrawn every 15
-// minutes (~15 s blackout each). Interrupted refreshes are reserved for
-// interaction frames (keys, popups, settings, alarms, data updates), whose
-// instability is transient — the next scheduled pass wipes it. Cost: the idle
-// clock/countdown advance in 15-minute jumps on the M5. Murphy keeps its
-// per-minute ticks. requestCompleteWaveformNextRefresh() is a no-op there.
+// of standing on one. So every STANDING image is the complete OTP waveform's
+// truthful render (true white, full color — the accent plane colors the next-
+// event card red): Screen enables setFullRefreshCompletesWaveform(), making
+// every show(true) a complete render (~15 s blackout), so a standing frame
+// can never be a parked cut-off frame by construction. Standing images are
+// event-driven (idle entry, first sync, dark toggle, dashboard refresh) plus
+// a scheduled 15-minute pass that also carries clock/countdown and synced
+// content forward — sync results do NOT get their own redraw. Interrupted
+// refreshes (show(false) / TRANSIENT_FULL) are reserved for transient frames
+// (keys, popups, settings, alarms), whose instability is wiped by the
+// complete render on exit. Cost: the idle clock and calendar content advance
+// in 15-minute jumps on the M5. Murphy keeps per-minute ticks and its normal
+// Full waveform; the M5-only calls are no-ops there.
 uint32_t lastCompleteWaveformMs = 0;
+#if FREEINK_DEVICE_M5
+bool firstSyncDrawn = false;  // one-shot: first sync after boot redraws now
+// Transient frames (alarms, popups, the connecting screen) must not take the
+// 15 s complete waveform; the standing render returns when they close.
+constexpr bool TRANSIENT_FULL = false;
+#else
+constexpr bool TRANSIENT_FULL = true;
+#endif
 #if FREEINK_DEVICE_M5
 constexpr uint32_t COMPLETE_WAVEFORM_INTERVAL_MS = 15UL * 60UL * 1000UL;
 #else
@@ -126,6 +140,17 @@ constexpr time_t MAINTENANCE_ALARM_GUARD_S = 180;
 
 bool panelMaintenanceDue(uint32_t ms) {
   return ms - lastCompleteWaveformMs >= COMPLETE_WAVEFORM_INTERVAL_MS;
+}
+
+// Every show(true) on the M5 runs the complete waveform; call sites drawing
+// one re-anchor the 15-minute schedule here. No-op elsewhere.
+void noteCompletePass(uint32_t ms) {
+#if FREEINK_DEVICE_M5
+  lastCompleteWaveformMs = ms;
+  webUi().notePanelMaintenance();
+#else
+  (void)ms;
+#endif
 }
 
 // Touch→logical mapping is SDK-owned (ui::snapshotFrom + touchToLogical, keyed
@@ -185,6 +210,7 @@ void enterIdle() {
   frontlight.setBrightness((uint8_t)settings().frontlightBrightness);
   fastRefreshCount = 0;
   screen->clearFocus();  // a fresh idle screen starts with no GPIO selection
+  noteCompletePass(millis());  // show(true) = complete render on the M5
   drawIdleScreen(true);
 }
 
@@ -212,6 +238,7 @@ void enterHibernate() {
   setCpuFrequencyMhz(80);
   frontlight.setBrightness(0);
   fastRefreshCount = 0;
+  noteCompletePass(millis());  // the hibernate banner is a standing image
   drawHibernateScreen(true);
 }
 
@@ -295,7 +322,7 @@ void startAlarm(const Event& ev) {
     alarmsound::startLoop((uint8_t)settings().alarmVolume);
   }
   screen->drawAlarm(ev, time(nullptr));
-  screen->show(true);
+  screen->show(TRANSIENT_FULL);  // must appear NOW — never the 15 s waveform
   // LEDs go last, AFTER the panel refresh: the refresh's current draw can sag
   // the PM1 LED rail and re-POR the LEDs, wiping anything written earlier.
   // One "flash light" setting drives whatever light the board has — the
@@ -313,11 +340,8 @@ void stopAlarm(bool fired) {
   alarmsound::stop();
   if (fired) calendarManager().markFired(ringingEvent);
   // The post-alarm idle frame becomes the standing image (the alarm screen
-  // was strobing interrupted frames over it), so render it with the complete
-  // waveform and restart the 15-minute clock. No-op on Murphy.
-  display.requestCompleteWaveformNextRefresh();
-  lastCompleteWaveformMs = millis();
-  webUi().notePanelMaintenance();
+  // was strobing interrupted frames over it); enterIdle()'s show(true) is a
+  // complete render on the M5 and restarts the 15-minute clock.
   enterIdle();
   // The dismissing key's release lands after we're back in IDLE — keep it
   // from triggering idle key actions (a focus step on the PaperColor would
@@ -412,14 +436,12 @@ void setup() {
   screen = new Screen(display);
   settingsScreen = new SettingsScreen(display, frontlight);
   frontlight.setBrightness((uint8_t)settings().frontlightBrightness);
-  // The PaperColor's interrupted refreshes never run the panel's complete OTP
-  // waveform, so residue accumulates across reboots. Run it once on the boot
-  // screen for a true-white baseline (~15 s on the M5; no-op on other panels).
-  display.requestCompleteWaveformNextRefresh();
+  // Boot screen: a complete-waveform render on the M5 (show(true) always is,
+  // via Screen's setFullRefreshCompletesWaveform) — clears residue accumulated
+  // across reboots for a true-white baseline (~15 s; plain full elsewhere).
   screen->drawMessage("WakeInk", "Starting up...", "v" WAKEINK_VERSION);
   screen->show(true);
-  lastCompleteWaveformMs = millis();  // the boot refresh starts the hourly clock
-  webUi().notePanelMaintenance();
+  noteCompletePass(millis());  // the boot refresh starts the scheduled clock
 
   // Boot refreshes (the complete waveform above, the portal screen below) may
   // have re-POR'd the 3V3_L2 LED into garbage — settle it before loop() takes
@@ -438,7 +460,9 @@ void setup() {
     uiState = UiState::CONNECTING;
     screen->drawMessage("WakeInk", "Connecting to WiFi...",
                         wifiStore().lastConnectedSsid.c_str());
-    screen->show(true);
+    // Transient (stands only until WiFi resolves): don't spend a second 15 s
+    // complete pass on it right after the boot screen's.
+    screen->show(TRANSIENT_FULL);
   }
 }
 
@@ -559,11 +583,12 @@ void loop() {
       // insta-dismiss the next alarm.
       webUi().consumeDismiss();
 
-      // Bench knob: live retune of the interrupted-refresh cutoff, redrawn
-      // immediately so the band position is visible at the new value.
+      // Bench knob: live retune of the interrupted-refresh cutoff. Redrawn
+      // with an INTERRUPTED frame — the band being tuned only exists on the
+      // cut-off waveform (a complete render would hide it).
       if (const uint16_t cutoffMs = webUi().consumeCutoffRequest()) {
         display.setFastRefreshCutoffMs(cutoffMs);
-        drawIdleScreen(true);
+        drawIdleScreen(false);
         break;
       }
 
@@ -613,6 +638,7 @@ void loop() {
             darkChordArmed = false;
             settings().darkMode = !settings().darkMode;
             settings().save();
+            noteCompletePass(ms);  // polarity swap: standing image, complete render
             drawIdleScreen(true);
           }
           break;
@@ -665,7 +691,7 @@ void loop() {
                 screen->drawEventPopup(popupEvent, now);
                 screen->focusAction(Screen::TAP_SKIP);
                 screen->drawEventPopup(popupEvent, now);
-                screen->show(true);
+                screen->show(TRANSIENT_FULL);  // dialog: quick frame, complete render on close
               }
             } else if (r.action == Screen::TAP_SETTINGS) {
               uiState = UiState::SETTINGS;
@@ -687,7 +713,7 @@ void loop() {
             popupEvent = events[r.value];
             uiState = UiState::POPUP;
             screen->drawEventPopup(popupEvent, now);
-            screen->show(true);
+            screen->show(TRANSIENT_FULL);  // dialog: quick frame, complete render on close
           }
         } else if (r.action == Screen::TAP_SETTINGS) {
           uiState = UiState::SETTINGS;
@@ -700,31 +726,43 @@ void loop() {
         break;
       }
 
-      // Redraw when content changed (events differ after a sync / a skip from
-      // the web / display settings changed).
-      if (calendarManager().consumeDirtyFlag() || webUi().consumeDisplayRefresh()) {
 #if FREEINK_DEVICE_M5
-        // The new content becomes the standing image, so render it with the
-        // complete waveform (and restart the 15-minute clock) — this is what
-        // upgrades the first post-boot sync from a muddy interrupted frame to
-        // a clean one. Deferred to a quick draw if an alarm is imminent; the
-        // scheduled pass cleans up after it.
-        Event soon;
-        if (!calendarManager().nextAlarm(now + MAINTENANCE_ALARM_GUARD_S, soon)) {
-          display.requestCompleteWaveformNextRefresh();
-          lastCompleteWaveformMs = ms;
-          webUi().notePanelMaintenance();
+      // Content changes (sync results, web skips) do NOT earn their own
+      // redraw: the standing image advances on the scheduled 15-minute pass,
+      // which snapshots fresh content when it draws (alarms are unaffected —
+      // nextAlarm reads the synced data directly). Two exceptions redraw now
+      // with a complete render: the first sync after boot (real content
+      // replaces the empty boot frame immediately) and an explicit dashboard
+      // display refresh (user-initiated). Either downgrades to a quick frame
+      // when an alarm is imminent; the scheduled pass cleans up after it.
+      {
+        const bool dirty = calendarManager().consumeDirtyFlag();
+        const bool webRefresh = webUi().consumeDisplayRefresh();
+        const bool firstSync = dirty && !firstSyncDrawn;
+        if (dirty) firstSyncDrawn = true;
+        if (firstSync || webRefresh) {
+          Event soon;
+          if (!calendarManager().nextAlarm(now + MAINTENANCE_ALARM_GUARD_S, soon)) {
+            noteCompletePass(ms);
+            drawIdleScreen(true);
+          } else {
+            drawIdleScreen(false);  // alarm imminent: quick frame now
+          }
+          break;
         }
-        drawIdleScreen(true);
+      }
 #else
-        // A content swap (e.g. "No upcoming events" -> a populated calendar) is a
-        // full-screen change. The manufacturer's DU/fast waveform is a light
-        // partial-update drive and can't clear a change this large, so it must
-        // use the full (GC) waveform or it ghosts badly.
+      // Redraw when content changed (events differ after a sync / a skip from
+      // the web / display settings changed). A content swap (e.g. "No upcoming
+      // events" -> a populated calendar) is a full-screen change. The
+      // manufacturer's DU/fast waveform is a light partial-update drive and
+      // can't clear a change this large, so it must use the full (GC) waveform
+      // or it ghosts badly.
+      if (calendarManager().consumeDirtyFlag() || webUi().consumeDisplayRefresh()) {
         drawIdleScreen(true);
-#endif
         break;
       }
+#endif
 
       struct tm tmv;
       localtime_r(&now, &tmv);
@@ -738,9 +776,7 @@ void loop() {
         Event soon;
         if (panelMaintenanceDue(ms) &&
             !calendarManager().nextAlarm(now + MAINTENANCE_ALARM_GUARD_S, soon)) {
-          display.requestCompleteWaveformNextRefresh();
-          lastCompleteWaveformMs = ms;
-          webUi().notePanelMaintenance();
+          noteCompletePass(ms);
           drawIdleScreen(true);  // complete waveform (~15 s), stands until next pass
         }
 #else
@@ -857,9 +893,7 @@ void loop() {
         // Same standing-image strategy as idle (no alarm guard — nothing
         // rings here): a complete pass every 15 minutes, nothing in between.
         if (panelMaintenanceDue(ms)) {
-          display.requestCompleteWaveformNextRefresh();
-          lastCompleteWaveformMs = ms;
-          webUi().notePanelMaintenance();
+          noteCompletePass(ms);
           drawHibernateScreen(true);  // complete waveform (~15 s)
         }
 #else
