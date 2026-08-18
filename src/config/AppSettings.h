@@ -23,8 +23,9 @@ struct AppSettings {
   int lookaheadDays = 2;                // event query window (default: today + tomorrow)
   bool use24HourTime = false;
   bool darkMode = false;                // invert the on-device UI (white-on-black);
-                                        // toggled by the up+down key chord on
-                                        // buttons-only boards, or via the web API
+                                        // web-API only; forced off on the M5
+                                        // PaperColor (double-inverts the dark-
+                                        // polarity fast refresh — see fromJson)
   std::vector<String> myEmails;         // your accounts, matched against ICS ATTENDEE
                                         // lines to find your PARTSTAT (any-of)
 

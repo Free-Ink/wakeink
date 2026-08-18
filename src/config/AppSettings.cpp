@@ -114,7 +114,16 @@ void AppSettings::fromJson(const JsonDocument& doc) {
   if (lookaheadDays < 1) lookaheadDays = 1;
   if (lookaheadDays > 31) lookaheadDays = 31;
   use24HourTime = doc["use_24_hour_time"] | use24HourTime;
+#if FREEINK_DEVICE_M5
+  // Dark mode is unsupported on the PaperColor: the app-level inversion
+  // stacked on the driver's dark-polarity fast refresh double-inverts, putting
+  // interrupted frames back on the unstable white track. Force it off so a
+  // stale persisted value (or a raw API POST) can't re-enable it — there is
+  // deliberately no UI for it on this device.
+  darkMode = false;
+#else
   darkMode = doc["dark_mode"] | darkMode;
+#endif
   stringsFromJson(doc, "my_emails", myEmails);
   // Migration: older builds stored a single "my_email" string.
   const String legacyEmail = doc["my_email"] | "";

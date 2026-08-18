@@ -550,11 +550,12 @@ void Screen::focusAction(int action) {
 
 void Screen::clearFocus() { interactions_.setFocusedIndex(-1); }
 
-bool Screen::scrollUpcoming(int dir) {
+bool Screen::scrollUpcoming(int dir, bool page) {
   if (upcomingCount_ <= upcomingVisible_ || upcomingVisible_ == 0) return false;
   const uint16_t maxTop = (uint16_t)(upcomingCount_ - upcomingVisible_);
-  // Page by visible-minus-one so one row carries over as the reading anchor.
-  const int step = upcomingVisible_ > 1 ? upcomingVisible_ - 1 : 1;
+  // Page by visible-minus-one so one row carries over as the reading anchor;
+  // row mode steps one at a time.
+  const int step = (page && upcomingVisible_ > 1) ? upcomingVisible_ - 1 : 1;
   int next = (int)upcomingTop_ + dir * step;
   if (next < 0) next = 0;
   if (next > (int)maxTop) next = (int)maxTop;

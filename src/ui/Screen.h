@@ -72,10 +72,12 @@ class Screen {
   void clearFocus();
   bool hasFocus() const;
 
-  // Page the idle upcoming list (touch boards: vertical swipes; the list is a
-  // virtualized ui::list with a scroll indicator). dir +1 = show later events.
-  // Returns true when the window moved — the caller redraws.
-  bool scrollUpcoming(int dir);
+  // Scroll the idle upcoming list (a virtualized ui::list with a scroll
+  // indicator). dir +1 = show later events; page=true moves by a screenful
+  // (touch swipes), page=false by a single row (button presses — finer travel
+  // so short lists still give several responsive steps). Returns true when
+  // the window moved — the caller redraws.
+  bool scrollUpcoming(int dir, bool page = true);
 
   // Pushes the framebuffer to the panel.
   void show(bool full);

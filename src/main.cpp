@@ -652,9 +652,11 @@ void loop() {
             // Scroll the list immediately (release-edge, so a chord can't
             // half-fire); redraw only when the window actually moved, so an
             // end-of-list press doesn't waste a refresh.
-            if (screen->scrollUpcoming(input.wasReleased(KEY_DOWN) ? 1 : -1)) {
-              drawIdleScreen(false);
-            }
+            const bool down = input.wasReleased(KEY_DOWN);
+            const bool moved = screen->scrollUpcoming(down ? 1 : -1, /*page=*/false);
+            Serial.printf("[idle] key scroll %s: %s\n", down ? "down" : "up",
+                          moved ? "moved, redrawing" : "no-op (list fits or at end)");
+            if (moved) drawIdleScreen(false);
             break;
           }
           if (snap.confirm) {
